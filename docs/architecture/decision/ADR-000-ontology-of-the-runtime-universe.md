@@ -2,91 +2,85 @@
 id: ADR-000
 title: "Ontology of the Runtime Universe"
 status: "Approved"
-date: 2025-12-18
-related:
-  - ADR-010
-  - ADR-020
-  - ADR-030
+date: 2025-12-17
 tags:
   - ontology
-  - constitutional
-  - runtime-philosophy
-  - multi-agent-systems
+  - runtime
+  - foundational
+related:
+  TDRs:
+    - TDR-001: "Runtime Universe Core"
+    - TDR-002: "Tick / Time Manager"
+    - TDR-003: "Event System"
+    - TDR-004: "State & Versioning"
+    - TDR-005: "Resource / External Interface"
+    - TDR-006: "Agent Runtime"
+    - TDR-007: "Identity & Naming"
+    - TDR-008: "Dependency / Relationship"
+    - TDR-009: "Boundaries & Isolation"
 ---
 
-# 1. Context
+# Ontology of the Runtime Universe
 
-The runtime is a multi-agent orchestration system where multiple autonomous entities operate concurrently and interact over shared state.
-Before defining execution, determinism, truth, or agent behavior, the system must have a clear ontological foundation describing:
-	•	What entities exist in the universe
-	•	How they relate to one another
-	•	How the boundaries of the system are defined
-	•	How time, events, and state are conceptually modeled
+## 1. Context
 
-This foundational layer ensures that all subsequent architectural and technical decisions are coherent and grounded in a consistent conceptual universe.
+This ADR defines the **foundational ontology of the runtime universe**, specifying the conceptual existence of:
 
-# 2. Decision
+- **Entities:** agents, resources, ticks, events
+- **Temporal structure:** ticks/time
+- **State and versioning principles**
+- **Conceptual boundaries and isolation**
+- **Identity and causal relationships**
 
-The runtime universe is defined as follows:
+This ADR serves as the **source of truth** for all subsequent Technical Design Records (TDRs) and ensures conceptual consistency for deterministic multi-agent execution.
 
-## 2.1 Entities
+---
 
-The universe contains three primary classes of entities:
-	1.	Agents — autonomous programs capable of perceiving state and generating actions.
-	2.	Events — immutable, ordered records representing atomic changes within the universe.
-	3.	Resources — external capabilities (compute, storage, network) imported into the universe through controlled channels.
+## 2. Decision
 
-## 2.2 Time
-	•	Time is discrete and measured in ticks.
-	•	Each tick corresponds to an atomic step in the evolution of the universe.
-	•	Time provides the ordering required for reproducibility and determinism.
+The runtime universe will be conceptualized as:
 
-## 2.3 State
-	•	State is the accumulation of events applied over time.
-	•	It is conceptually immutable: every change produces a new view of state.
-	•	Snapshots and derived projections exist but are conceptually secondary to events.
+1. **Entities:** Fundamental actors including agents, events, resources, and ticks.
+2. **Time/Ticks:** Discrete temporal units that order all events.
+3. **Events:** Immutable, ordered records of atomic changes.
+4. **State:** Derived from accumulated events, uniquely identified and versioned.
+5. **Resources / External Interfaces:** Controlled inputs and outputs to the universe.
+6. **Agents:** Autonomous entities capable of perceiving state and acting.
+7. **Identity & Relationships:** Deterministic identity for all entities; causal and dependency relationships formally defined.
+8. **Boundaries & Isolation:** Conceptual separation between agents, external interfaces, and the universe itself.
 
-## 2.4 Identity
+---
 
-Every core entity has a stable identity:
-	•	Agents have a unique Agent ID
-	•	Events have a unique Event ID
-	•	State snapshots or commits have a hash or identifier
-	•	Ticks have a sequential number
+## 3. Rationale
 
-These identities ensure traceability and reproducibility.
+- Provides a **single source of truth** for all technical design and implementation decisions.
+- Ensures **deterministic execution** via ordering of events, state, and agent actions.
+- Supports **extensibility** for new entities, resources, or agent types.
+- Enables TDRs to **derive concrete system components** directly from a coherent ontology.
 
-## 2.5 Boundaries
-	•	The universe is logically closed: all computation occurs inside defined boundaries.
-	•	Nondeterministic effects from the external environment enter the universe only through events.
-	•	Resources are mediated by the runtime to preserve conceptual consistency.
+---
 
-# 3. Rationale
-	1.	Foundational Clarity
-Defining what exists in the runtime ensures that all subsequent architectural decisions (execution, truth, agent isolation) are based on a coherent conceptual model.
-	2.	Enables Determinism and Reproducibility
-By explicitly modeling events, ticks, and identity, determinism and replay can be reasoned about abstractly, independent of implementation.
-	3.	Supports Multi-Agent Concurrency
-Understanding the universe, its entities, and their boundaries allows reasoning about safe concurrency and isolation.
-	4.	Future-Proofing
-This abstract layer allows the introduction of new paradigms (e.g., GitNative event sourcing, reactive streams) without violating the fundamental ontology.
+## 4. Technical Design Records (TDRs)
 
-# 4. Consequences
+The following TDRs implement the ontology defined in this ADR:
 
-## 4.1 Positive
-	•	Provides a clear mental model for architects, developers, and designers.
-	•	Establishes a universal reference for downstream ADRs (execution, truth, agents).
-	•	Enables reasoning about correctness, reproducibility, and isolation at a philosophical level.
+| TDR | Derived Concept | Focus / Components |
+|-----|----------------|------------------|
+| TDR-001 | Runtime Universe Core | System-wide runtime, entity registry, logging, universal ID service. |
+| TDR-002 | Tick / Time Manager | Tick counter, scheduler, tick queue, synchronization interfaces. |
+| TDR-003 | Event System | Event store, dispatcher, immutable and replayable events, serialization. |
+| TDR-004 | State & Versioning | State storage, snapshot manager, hash generator, version resolver. |
+| TDR-005 | Resource / External Interface | Resource registry, API adapters, sandboxed inputs/outputs. |
+| TDR-006 | Agent Runtime | Agent loader, lifecycle manager, capability enforcement, event interface. |
+| TDR-007 | Identity & Naming | Deterministic ID generation, name resolution, global identity registry. |
+| TDR-008 | Dependency / Relationship | Causal graph, lineage tracking, DAG manager, dependency resolver. |
+| TDR-009 | Boundaries & Isolation | Conceptual isolation enforcement, sandbox manager, capability monitor. |
 
-## 4.2 Negative
-	•	Highly abstract; cannot be directly implemented.
-	•	May require translation into concrete TDRs for technical enforcement.
+---
 
-## 4.3 Neutral / Trade-offs
-	•	Implementation may vary (Node.js, WASM, GPU, database), but the ontological model remains constant.
-	•	Does not prescribe determinism or isolation mechanisms, only the conceptual framework.
+## 5. Consequences
 
-# 5. Status
-
-Approved.
-This ADR constitutes the constitutional foundation for all runtime-related architecture. All determinism, truth, and agent ADRs (010–039 series) must reference ADR-000 as their parent.
+- All TDRs **trace directly to a conceptual foundation**, ensuring consistency across implementation.
+- Guarantees that future architectural and runtime decisions **do not violate the ontology**.
+- Facilitates **engineering review** and automated verification, as each TDR references this ADR.
+- Provides a **clear hierarchy** for subsequent ADRs, TDRs, and implementation artifacts.
