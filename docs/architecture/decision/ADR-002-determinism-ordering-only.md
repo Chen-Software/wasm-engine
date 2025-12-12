@@ -1,18 +1,18 @@
 ---
-Title: Ordering-Only Determinism for Federated Multi-Agent Runtime
-Status: Proposed
-Owners: [Engineering Team]
-Reviewers: [Engineering Team]
-Context: >
-   Extends ADR-001 (Shared Runtime: Node.js + WASM + ONNX Runtime)
-Date: 2025-12-12
-Version: 0.1
+id: ADR-002
+title: "Ordering-Only Determinism for Federated Multi-Agent Runtime"
+status: "Proposed"
+date: 2025-12-17
+related:
+  - ADR-001
+  - ADR-003
+tags:
+  - runtime
+  - determinism
+  - scheduler
 ---
 
-# Ordering-Only Determinism for Federated Multi-Agent Runtime
-## Architecture Decision Record (ADR-002)
-
----
+# ADR-002: Ordering-Only Determinism for Federated Multi-Agent Runtime
 
 ## 1. Context / Problem Statement
 
@@ -193,5 +193,3 @@ Decision: **Rejected** due to extreme complexity and no benefit within this arch
 * WebAssembly Threads & Atomics Specifications
 * ONNX Runtime Execution Provider Determinism Notes
 * Research on deterministic distributed systems (CRDTs, event sourcing, transactional graphs)
-
----
