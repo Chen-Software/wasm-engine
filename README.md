@@ -1,14 +1,14 @@
 # wasm-engine
 
-Welcome to this high-performance desktop application project, a forward-looking concept designed to push the boundaries of computation and rendering.
+Welcome to `wasm-engine`, a next-generation runtime engine designed to provide an operating system-level platform for high-performance, graphically-intensive applications.
 
-This project is currently in the **conceptual phase**. The architecture is designed to serve as a blueprint for building applications that require maximum CPU and GPU throughput while maintaining a fluid user experience.
+This project is currently in the **conceptual phase**. The architecture serves as a blueprint for a runtime that combines sandboxed, near-native computation with a high-throughput, parallel rendering pipeline.
 
 ## Core Technologies
 
-This project's architecture is built upon a powerful combination of modern technologies:
+The engine's architecture is built upon a powerful combination of modern technologies:
 
-- **Electron**: For creating the cross-platform desktop application shell, managing the UI, and orchestrating backend processes.
+- **Electron**: Serves as the host environment, providing the main event loop, OS-level integration, and the orchestration layer for the engine's core components.
 - **Servo**: A multi-threaded, Rust-based rendering engine used for all high-performance, GPU-accelerated rendering tasks.
 - **WebAssembly (WASM)**: For running CPU-intensive computations (like simulations, physics, or data processing) at near-native speed in a sandboxed environment.
 
