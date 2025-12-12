@@ -91,27 +91,33 @@ flowchart TB
 
 ## 5. Implementation Roadmap
 
-### Phase 1: Core Headless Runtime
--   **Focus**: Establish a stable, deterministic, headless runtime.
--   **Tasks**:
-    -   Implement the Node.js orchestrator with a basic, round-robin scheduler.
-    -   Integrate the WASM worker pool for executing agent logic.
-    -   Integrate **ONNX Runtime** for all GPU/CPU inference tasks.
-    -   Define initial IPC mechanisms for communication between the orchestrator and the compute layers.
+```mermaid
+gantt
+    title Local-First Multi-Agent Runtime Implementation Roadmap
+    dateFormat  YYYY-MM-DD
+    axisFormat  %b %d
 
-### Phase 2: Advanced Orchestration & Data Handling
--   **Focus**: Optimize performance and enable complex multi-agent scenarios.
--   **Tasks**:
-    -   Implement a more advanced, DAG-based scheduler in the orchestrator.
-    -   Refine IPC with shared memory buffers, managed exclusively by the orchestrator and passed to ONNX/WASM.
-    -   Develop robust error handling and fault isolation between agents.
+    section Phase 1: Proof of Concept
+    Node.js + ONNX Runtime harness      :done,    des1, 2025-12-12, 2025-12-19
+    Load small LLM in ONNX format       :done,    des2, 2025-12-12, 2025-12-20
+    Benchmark CPU/GPU latency           :active,  des3, 2025-12-20, 2025-12-26
+    Validate deterministic scheduling   :active,  des4, 2025-12-20, 2025-12-26
 
-### Phase 3: Optional UI & Monitoring
--   **Focus**: Build a decoupled, high-performance monitoring and visualization layer.
--   **Tasks**:
-    -   Create the Electron Renderer process for the main UI.
-    -   Establish a read-only IPC channel for the UI to request state from the orchestrator.
-    -   **Optionally**, embed a **Servo** view within the Electron UI purely for advanced, GPU-accelerated visualizations of agent state. This component is completely decoupled from the core compute loop.
+    section Phase 2: WASM Integration
+    Integrate WASM worker pool          :         des5, 2025-12-27, 2026-01-10
+    Implement safe IPC / serialization  :         des6, 2025-12-27, 2026-01-10
+    Test multi-agent concurrency        :         des7, 2026-01-11, 2026-01-24
+
+    section Phase 3: Optional UI & Visualization
+    Add Electron Renderer (optional)    :         des8, 2026-01-25, 2026-02-07
+    Embed Servo UI (optional)           :         des9, 2026-01-25, 2026-02-07
+    Implement agent dashboard & logs    :         des10, 2026-01-25, 2026-02-07
+
+    section Phase 4: Optimization & Hardening
+    Profile orchestration & GPU paths   :         des11, 2026-02-08, 2026-02-21
+    Implement graceful GPU fallback     :         des12, 2026-02-08, 2026-02-21
+    Cross-platform testing              :         des13, 2026-02-22, 2026-03-07
+```
 
 ---
 
@@ -122,3 +128,14 @@ This Master Architecture provides a robust and production-ready runtime:
 -   It leverages proven technologies for compute: **WASM** for CPU logic and **ONNX Runtime** for reliable GPU inference.
 -   **Servo's role is strictly limited to optional, decoupled UI visualization**, removing it from the critical compute path.
 -   The design supports both headless and UI-integrated modes effectively.
+
+---
+
+## 7. Designing for Servo or More Open Web Platforms
+
+A core strategic goal is to minimize dependency on the Chrome/Electron ecosystem while still providing a rich, optional UI. The architecture achieves this through the following design principles:
+
+1.  **Headless-First Core**: The orchestrator (`Node.js`) + compute (`WASM` + `ONNX Runtime`) layers are fundamentally headless. They form a self-contained, high-performance runtime that does not require a UI, ensuring determinism and reliability.
+2.  **Servo for an Open UI**: By embedding **Servo** as the optional UI renderer, the project can leverage an open, Rust-based, and lightweight engine that is independent of Chromium. It can render standard HTML/CSS/JS dashboards for monitoring.
+3.  **Decoupled Communication**: The UI layer communicates with the orchestrator via safe, standardized IPC (e.g., JSON, MessagePack). It has no direct access to the compute pipelines, reinforcing the separation of concerns.
+4.  **Future Flexibility**: This headless-first approach allows for future UI implementations that are even more platform-agnostic, such as serving a web interface from the orchestrator that any modern browser could render.
