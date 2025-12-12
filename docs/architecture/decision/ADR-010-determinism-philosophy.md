@@ -6,6 +6,7 @@ date: "2025-12-17"
 owners: ["Engineering Team"]
 reviewers: ["Engineering Team"]
 related:
+  - "ADR-000"
   - "ADR-001"
   - "ADR-011"
   - "ADR-012"
