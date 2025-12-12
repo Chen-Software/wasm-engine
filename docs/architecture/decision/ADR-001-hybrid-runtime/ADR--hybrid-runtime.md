@@ -1,53 +1,54 @@
 ---
-Status: Approved
+Status: Proposed
+Date: 2025-12-12
+Version: 0.4
 Owners: [Engineering Team]
 Reviewers: [Engineering Team]
-Date: 2025-12-12
-Version: 1.0
-ID: 3b95ebbd87fc61525c970ac6180ccd397b449d31
----
-
-# ADR: Node.js + WASM + ONNX Runtime as the Shared Runtime
-## Architecture Decision Record
+Tags: [Architecture, Runtime, Node.js, Bun, WASM, ONNX, Electron, WebGPU]
 
 ---
+
+# ADR: Node.js + WASM + ONNX Runtime as the Shared Runtime (Updated)
 
 ## 1. Context / Problem Statement
 
-We need a shared runtime for a local-first, multi-agent system with the following requirements:
-- **CPU-bound agent logic**: Agents must run in a sandboxed, high-performance environment.
-- **GPU-bound LLM inference**: The system must leverage GPU acceleration for large model inference.
-- **Deterministic scheduling**: Agent execution must be reproducible for debugging and reliability.
-- **Cross-platform support**: The runtime must support Linux, Windows, and macOS.
-- **Headless operation**: The system must run without a graphical interface for server-like deployments.
+We need a production-ready, native-first, headless runtime for a local-first multi-agent system with these requirements:
 
-The original proposal considered a hybrid runtime using `Servo + Electron + WASM + Node.js`, with Servo WebGPU intended for GPU compute. However, a detailed technical review identified critical issues with this approach:
+* **CPU-bound agent logic**: Sandbox execution with deterministic behavior.
+* **GPU-bound inference**: Efficient execution of LLMs and ML workloads on GPU with CPU fallback.
+* **Deterministic scheduling**: Repeatable execution across agents for debugging and reliability.
+* **Cross-platform support**: Linux, Windows, macOS.
+* **Optional UI**: The core runtime must be headless with an optional decoupled interface.
 
-- **Experimental Technology**: Servo WebGPU is not production-ready and is unsafe for compute-intensive tasks.
-- **Undefined Memory Safety**: The semantics for shared memory between WASM and Servo are unclear, creating a high risk of data corruption.
-- **Non-Deterministic Scheduling**: Servo's asynchronous GPU task model makes deterministic agent scheduling impossible.
-- **Unreliable Headless Mode**: The lack of a stable CPU fallback in Servo makes headless operation unreliable.
-- **Inconsistent GPU Portability**: Cross-platform GPU support is not guaranteed.
+Previous approaches using Servo WebGPU were rejected due to experimental API safety risks, non-deterministic scheduling, and unreliable headless support.
 
 ---
 
 ## 2. Decision
 
-We will adopt a revised architecture centered on **Node.js** as the primary orchestrator, combined with **WASM workers** for CPU-bound agent logic and **ONNX Runtime** for GPU-bound inference.
+Adopt a **Node.js orchestrator + WASM worker pool + ONNX Runtime** stack as the core runtime, with a fully optional decoupled UI.
 
-### Key Components:
-1.  **Shared Runtime (Orchestrator)**: **Node.js**
-    -   Manages the entire agent lifecycle, including task queues, priorities, and deterministic scheduling.
-    -   Handles Inter-Process Communication (IPC), shared memory (`SharedArrayBuffer`), and message queues.
-2.  **CPU Logic**: **WASM Workers**
-    -   Execute agent logic in a sandboxed environment, preventing main-thread blocking and ensuring security.
-    -   Communicate with the Node.js orchestrator via `SharedArrayBuffer` with `Atomics` for low-latency data exchange or standard message queues.
-3.  **GPU Logic**: **ONNX Runtime**
-    -   Handles all LLM inference and other GPU-intensive compute tasks.
-    -   Provides deterministic execution guarantees and automatic CPU fallback, ensuring reliability in headless deployments or on machines without a compatible GPU.
-4.  **Headless-First Design**:
-    -   The core architecture is designed for fully headless operation.
-    -   Any user interface (UI) is considered optional and is decoupled from the core runtime.
+### Key Components
+
+1. **Node.js Orchestrator (Shared Runtime)**
+   * Central scheduler, task queue manager, IPC hub.
+   * Deterministic scheduling with configurable strategies (round-robin, priority-based).
+   * Manages WASM workers and ONNX Runtime execution.
+
+2. **WASM Worker Pool**
+   * Executes CPU-bound agent logic in sandboxed threads.
+   * Communication via `SharedArrayBuffer` with `Atomics` for high-performance, safe data sharing.
+   * Ensures isolation between agents and the orchestrator.
+
+3. **ONNX Runtime**
+   * Executes GPU-bound inference (LLMs and other ML models).
+   * CPU fallback for environments without compatible GPU.
+   * Model management and deterministic execution.
+
+4. **Optional UI Layer**
+   * Fully decoupled for visualization and control (read-only access).
+   * Communicates with orchestrator via IPC (WebSockets, memory-mapped files).
+   * Does not interact directly with WASM workers or ONNX Runtime.
 
 ---
 
@@ -55,31 +56,34 @@ We will adopt a revised architecture centered on **Node.js** as the primary orch
 
 | Alternative | Pros | Cons |
 | :--- | :--- | :--- |
-| **Servo WebGPU for GPU** | Lightweight, Rust-native, open ecosystem. | Experimental, unsafe for compute, undefined memory sharing, unreliable headless fallback. |
-| **Node.js + WASM + ONNX Runtime** | Proven orchestration, deterministic scheduling, safe memory model, reliable GPU/CPU fallback, cross-platform. | Requires a separate, decoupled UI integration if a graphical interface is needed. |
+| Servo WebGPU | Rust-native, lightweight | Experimental, unsafe for compute, unreliable headless, non-deterministic scheduling |
+| Node.js + WASM + ONNX Runtime | Stable, safe, deterministic, GPU/CPU fallback, cross-platform | UI must be decoupled, separate toolchain for ONNX and WASM |
+| Bun + WASM + ONNX Runtime | Fast JS runtime, simplified development, experimental | Limited native addon support, GPU bindings immature, less ecosystem stability |
+| Electron + WebGPU | Browser-based UI + Node.js integration | Requires unsafe flags for WebGPU, heavy runtime footprint, headless reliability issues, non-deterministic GPU task execution |
 
-**Decision Rationale**: The `Node.js + WASM + ONNX Runtime` stack is the only alternative that meets all core requirements for a deterministic, safe, and production-ready multi-agent system. It replaces high-risk experimental components with battle-tested, industry-standard technologies.
+**Decision Rationale:** Node.js + WASM + ONNX Runtime is the only alternative that fully meets core requirements for determinism, safety, and production readiness, while providing a stable path for GPU and CPU computation. Other options are either experimental or carry operational risks for headless multi-agent execution.
 
 ---
 
 ## 4. Consequences
 
-### Positive:
--   **Deterministic Scheduling**: The Node.js orchestrator enables reproducible agent behavior.
--   **Memory Safety**: Communication via `SharedArrayBuffer` with `Atomics` or serialized messages provides a well-defined and safe memory model.
--   **Reliable Compute**: ONNX Runtime offers robust GPU acceleration with automatic CPU fallback, ensuring the system runs on any hardware.
--   **Headless Operation**: The architecture is optimized for server-like deployments without a UI.
--   **Cross-Platform Confidence**: The chosen components have proven track records on Linux, Windows, and macOS.
+### Positive
 
-### Negative / Trade-offs:
--   **UI Decoupling**: Any UI layer (such as one built with Servo) must be strictly separated from the core runtime, which may introduce minor performance overhead due to serialization and IPC.
--   **Toolchain Complexity**: The development environment requires setting up toolchains for both ONNX Runtime and WASM.
+* Deterministic, reproducible agent scheduling.
+* Safe memory model using WASM sandboxing and `SharedArrayBuffer` + `Atomics`.
+* Robust GPU acceleration with automatic CPU fallback.
+* Fully headless operation for edge or server deployments.
+* Cross-platform support with proven runtime components.
+
+### Trade-offs
+
+* Decoupled UI introduces minor IPC overhead.
+* Requires configuration of toolchains for WASM and ONNX Runtime.
 
 ---
 
-## 5. Implementation Notes / Architecture Overview
+## 5. Architecture Overview
 
-### Architecture (Headless Mode):
 ```
 +---------------------------+
 |    Node.js Orchestrator   |
@@ -93,21 +97,38 @@ We will adopt a revised architecture centered on **Node.js** as the primary orch
 |  WASM Worker Pool    |  |    ONNX Runtime      |
 | - CPU-bound agents   |  | - GPU/CPU Inference  |
 +----------------------+  +----------------------+
+             |
+   Optional Decoupled UI (Read-Only)
 ```
 
-### IPC & Shared Memory Guidelines:
--   **In-process Communication**: Use `SharedArrayBuffer` with `Atomics` for high-performance, low-latency, and safe data exchange between the Node.js orchestrator and WASM workers.
--   **Cross-process Communication**: For communication with a decoupled UI or other external processes, use memory-mapped files or serialized messages (e.g., JSON, MessagePack).
--   **UI is Read-Only**: A UI should only read agent state and should never write directly to shared agent memory.
+### Communication Guidelines
 
-### Key Principles:
--   The UI must be optional and fully decoupled from the core logic.
--   All GPU compute is delegated exclusively to ONNX Runtime.
--   Deterministic scheduling is enforced by the Node.js orchestrator's task queues.
+* **In-process:** `SharedArrayBuffer` + `Atomics` for high-speed data exchange.
+* **Cross-process:** IPC via WebSockets or memory-mapped files for optional UI.
+* **UI is read-only** and never directly modifies agent memory.
 
 ---
 
-## 6. References
--   [ONNX Runtime Documentation](https://onnxruntime.ai/docs/)
--   [WebAssembly Threads and Atomics (MDN)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly)
--   [Node.js Worker Threads](https://nodejs.org/api/worker_threads.html)
+## 6. Memory & Resource Management
+
+* WASM workers maintain private linear memory (heap).
+* Shared memory for orchestrator ↔ workers communication is strictly synchronized.
+* ONNX Runtime manages GPU memory separately; orchestrator and workers do not access GPU memory directly.
+* Node.js orchestrator monitors CPU and memory usage and schedules workers accordingly.
+
+---
+
+## 7. Future Enhancements
+
+* Advanced scheduling algorithms (e.g., DAG-based scheduling).
+* Dynamic scaling of WASM worker pool based on system load.
+* WASI integration for controlled system resource access from WASM.
+* Optional integration of WebGPU through Dawn or other native backends for GPU compute if needed.
+
+---
+
+## 8. References
+
+* [ONNX Runtime Documentation](https://onnxruntime.ai/docs/)
+* [WebAssembly Threads and Atomics (MDN)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly)
+* [Node.js Worker Threads](https://nodejs.org/api/worker_threads.html)
