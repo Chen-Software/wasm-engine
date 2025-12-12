@@ -1,17 +1,17 @@
 ---
-status: Proposed
-date: 2025-12-12
+status: Revised
+date: 2025-12-13
 authors: [Jules]
-version: 1.0
+version: 2.0
 ---
 
 # Architecture Decision Record (ADR)
 
 **Title**: Hybrid Runtime Architecture for Local-First Multi-Agent and WebLLM Compute
 
-**Status**: Proposed / Engineering Review
+**Status**: Revised / Engineering Review
 
-**Date**: 2025-12-12
+**Date**: 2025-12-13
 
 **Authors**: [Jules]
 
@@ -19,95 +19,78 @@ version: 1.0
 
 ## 1. Context
 
-We aim to build a local-first, high-performance runtime for:
-	•	Multi-agent orchestration
-	•	Local inference of small to medium LLMs
-	•	Optional monitoring UI
+This ADR revises the previous decision regarding the GPU compute runtime. The goal remains to build a local-first, high-performance runtime for multi-agent orchestration and local LLM inference. However, a technical assessment revealed that Servo is unsuitable for the core runtime due to concerns about deterministic scheduling and safety in a multi-agent context.
 
 The runtime must:
-	1.	Support CPU-bound computation (agent logic, inference) efficiently.
-	2.	Support GPU-bound computation (matrix-heavy operations) locally.
-	3.	Operate in headless and non-headless modes.
-	4.	Ensure deterministic scheduling, low-latency communication, and safe sandboxing for multiple agents.
-
-**Constraints**:
-	•	Must run fully offline.
-	•	Avoid external cloud dependencies.
-	•	Leverage existing technologies (Node.js, Electron, WebAssembly, Servo) where practical.
+1.  Support CPU-bound computation (agent logic, inference) efficiently and safely.
+2.  Support GPU-bound computation (matrix-heavy operations) reliably and deterministically.
+3.  Operate in a headless mode without requiring a UI or rendering context.
+4.  Ensure deterministic scheduling, low-latency communication, and safe sandboxing for multiple agents.
 
 ---
 
 ## 2. Decision
 
-Adopt a hybrid runtime architecture combining:
-	1.	**Electron** as the desktop runtime and optional UI orchestrator.
-	2.	**WebAssembly (WASM)** modules for CPU-bound agent logic and inference tasks.
-	3.	**Servo WebGPU** for GPU-bound tasks (matrix multiplications, tensor ops, LLM acceleration).
-
-**Key design principles**:
-	•	**Headless mode**: Servo handles GPU tasks without UI; WASM handles CPU tasks.
-	•	**Non-headless mode**: Optional Electron UI monitors agents, orchestrates tasks; Servo still handles GPU compute.
-	•	**Shared memory buffers**: Zero-copy communication between WASM and Servo GPU tasks.
-	•	**Deterministic scheduling**: Main Electron process orchestrates tasks; WASM workers execute CPU tasks; Servo asynchronously handles GPU workloads via WGPU thread + poller.
+Adopt a hybrid runtime architecture orchestrated by **Electron/Node.js** that combines:
+1.  **Electron/Node.js** as the primary runtime for deterministic task scheduling and orchestration.
+2.  **WebAssembly (WASM)** modules running in worker threads for CPU-bound agent logic.
+3.  **ONNX Runtime** for GPU-bound inference tasks, providing reliable execution and automatic CPU fallback.
+4.  **Servo** as an **optional and decoupled UI layer** for advanced visualizations only. It will not participate in the core agent computation or orchestration pipeline.
 
 ---
 
 ## 3. Rationale
 
+The decision is based on the need for a deterministic and safe shared runtime, which Electron/Node.js provides, while the previous choice (Servo) introduced significant risks.
+
 | Requirement | Why this approach |
 | :--- | :--- |
-| CPU-bound computation | WASM provides near-native performance with sandboxing; worker threads allow parallel agent execution |
-| GPU-bound computation | Servo WebGPU exposes a dedicated GPU thread and async pipeline, unlike Electron unsafe WebGPU which is renderer-dependent and unstable |
-| Headless operation | Servo allows GPU tasks without UI; Electron optional for Node.js orchestration |
-| UI integration | Electron enables optional UI for monitoring or debugging without interfering with compute tasks |
-| Low-latency agent coordination | Shared memory between WASM and Servo minimizes data copying overhead |
-| Safety and isolation | WASM sandboxing + Servo thread isolation prevent faults from propagating across agents |
+| **Deterministic Scheduling** | The Node.js event loop, controlled by a central orchestrator, allows for predictable, turn-based scheduling of agent tasks. |
+| **Safe Shared Memory / IPC** | Node.js provides robust mechanisms to safely coordinate `SharedArrayBuffer` and `Atomics` between WASM workers. |
+| **Concurrency Control** | The orchestrator can manage explicit task queues for both CPU (WASM) and GPU (ONNX) workloads, preventing conflicts. |
+| **Headless Support** | Node.js is designed for headless operation. ONNX Runtime's CPU fallback ensures GPU tasks can run without a rendering context. |
+| **Reliable GPU Compute** | ONNX Runtime is a mature, cross-platform library for GPU inference that guarantees deterministic execution. |
 
 ---
 
 ## 4. Architecture Overview
 
+The core runtime consists of the Electron/Node.js orchestrator, WASM workers for CPU tasks, and ONNX Runtime for GPU tasks. Servo is an optional, external component for UI only.
+
 ```mermaid
 flowchart LR
-    subgraph Desktop Runtime (Electron)
-        MainProcess[Electron Main Process / Orchestrator]
+    subgraph Core Runtime (Electron/Node.js)
+        MainProcess[Main Orchestrator]
         WorkerPool[WASM Worker Pool for CPU tasks]
-        ServoRuntime[Servo Embedded for GPU tasks]
-        UI[Optional UI / Monitoring]
+        ONNXRuntime[ONNX Runtime for GPU tasks]
+        SharedMem[Shared Memory / Buffers]
+    end
+
+    subgraph Optional UI
+        ServoUI[Servo for Visualization]
     end
 
     MainProcess --> WorkerPool
-    WorkerPool --> SharedMem[Shared Memory / Buffers]
-    MainProcess --> ServoRuntime
-    ServoRuntime --> GPU[GPU / WebRender via WebGPU]
-    WorkerPool --> ServoRuntime
-
-    UI --> MainProcess
+    WorkerPool --> SharedMem
+    MainProcess --> ONNXRuntime
+    ONNXRuntime --> SharedMem
+    MainProcess --> ServoUI
 ```
-
-**Data Flow**:
-	1.	MainProcess schedules CPU/GPU tasks.
-	2.	WASM workers execute CPU-bound logic; intermediate results stored in shared memory.
-	3.	Servo WebGPU executes GPU-bound computations asynchronously.
-	4.	Results propagate back to orchestrator and optionally to UI.
 
 ---
 
 ## 5. Consequences
 
 **Benefits**:
-	•	High-performance hybrid CPU + GPU architecture.
-	•	Headless GPU compute possible via Servo.
-	•	Safe sandboxing of agents via WASM.
-	•	Optional UI for monitoring without impacting compute.
-	•	Shared memory enables zero-copy data transfer.
+-   **Deterministic Orchestration**: Ensures reproducible behavior for multi-agent systems.
+-   **High Reliability**: Uses mature technologies (Node.js, WASM, ONNX) for the core runtime.
+-   **Robust Headless Mode**: Guaranteed to run without a UI, with CPU fallback for GPU tasks.
+-   **Safe Concurrency**: Clear separation of concerns and controlled access to shared resources.
+-   **Cross-Platform Consistency**: The chosen stack is well-supported on Windows, macOS, and Linux.
 
 **Trade-offs / Risks**:
-	•	Servo WebGPU is experimental; feature gaps and performance limitations exist.
-	•	Architecture complexity increases with multiple runtimes.
-	•	Electron UI may not be needed in headless deployments; can be omitted to simplify.
-	•	GPU compute via Servo may not match native CUDA/Vulkan performance.
-	•	Requires careful thread and memory management to avoid race conditions.
+-   **New Dependency**: Adds ONNX Runtime to the project, which will need to be managed.
+-   **UI Complexity**: If advanced visualizations are required, managing a decoupled Servo instance adds architectural overhead.
 
 ---
 
@@ -115,20 +98,18 @@ flowchart LR
 
 | Option | Pros | Cons |
 | :--- | :--- | :--- |
-| Electron + WASM only | Stable, mature, easy to package | No reliable GPU acceleration; unsafe WebGPU experimental; poor performance for matrix-heavy LLM tasks |
-| Servo only (headless) | Direct GPU compute, multi-threaded | Limited desktop integration, no orchestration UI, harder packaging |
-| Node.js + native GPU libs (CUDA/Vulkan) | High-performance compute | Platform-specific; cross-platform packaging and integration harder; more dependencies |
-
-**Decision justification**: Hybrid architecture provides a balanced solution: cross-platform packaging + optional UI + WASM CPU workers + Servo GPU acceleration, suitable for both headless and non-headless use cases.
+| **Electron + WASM + Servo (for GPU)** | Proposed leveraging Servo's rendering engine for GPU tasks. | Unsafe for deterministic scheduling, unreliable headless mode, and unproven shared memory model for agent orchestration. **Rejected due to high risk.** |
+| **Node.js + Native GPU Libs** | Offers the highest possible performance for GPU compute. | Platform-specific, significantly increases packaging complexity, and creates a higher maintenance burden. |
+| **Electron + WASM only** | Simple and stable stack. | Lacks reliable, cross-platform GPU acceleration for LLM tasks. |
 
 ---
 
 ## 7. Next Steps
-	1.	Prototype WASM + Servo GPU integration with a simple LLM inference pipeline.
-	2.	Establish shared memory conventions between WASM workers and Servo GPU tasks.
-	3.	Optional Electron UI to monitor agent execution and GPU task status.
-	4.	Document threading, scheduling, and fault isolation strategies.
-	5.	Evaluate performance and iterate on GPU task batching for Servo WebGPU.
+1.  Prototype the `Electron + WASM + ONNX Runtime` integration with a simple LLM inference pipeline.
+2.  Define the API and data transfer conventions between the Node.js orchestrator and the ONNX Runtime.
+3.  Implement a deterministic task scheduler in the main orchestrator to manage the agent task queue.
+4.  Document the shared memory layout and synchronization mechanisms.
+5.  (Optional) Design the decoupled interface for the Servo visualization layer to consume data from the core runtime.
 
 ---
 
