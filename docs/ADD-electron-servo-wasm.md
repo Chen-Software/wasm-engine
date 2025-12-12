@@ -1,194 +1,134 @@
 ---
-Version: 1.0
-Date: 2025-12-12
+title: Hybrid Local-First Runtime Architecture for Multi-Agent Systems and WebLLM
+status: Proposed / Engineering Review
+date: 2025-12-12
+authors: [Jules]
 ---
 
-# Architecture Design Document: Electron + Servo + WASM Stack
+# 1. Overview
 
-## 1. Overview
+This document describes the high-level technical architecture of a local-first hybrid runtime for multi-agent orchestration and LLM inference, supporting both headless and non-headless desktop modes.
 
-This architecture combines:
-- **Electron**: Desktop application framework (Node.js + Chromium) for UI, OS integration, and orchestration.
-- **Servo**: Multi-threaded Rust-based rendering engine for GPU-accelerated layout and high-performance rendering tasks.
-- **WebAssembly (WASM)**: High-performance CPU-bound modules compiled from Rust or C/C++ for compute-heavy operations (simulation, physics, data processing).
-
-### Goals:
-- Maximize CPU/GPU throughput for computation and rendering tasks.
-- Maintain responsive UI in Electron main and renderer processes.
-- Minimize memory copy overhead via shared memory buffers.
-- Enable scalable parallelism using worker threads and Servo’s multi-threaded engine.
-
----
-
-## 2. System Components
-
-### 2.1 Electron Layer
-- **Responsibilities**:
-    - UI rendering and DOM management
-    - Node.js API access (file system, networking)
-    - Orchestration of worker threads and WASM modules
-- **Processes**:
-    - **Main process**: Manages app lifecycle, orchestrates tasks, IPC hub.
-    - **Renderer process**: Displays UI, communicates with WASM/Servo via IPC.
-
-### 2.2 Servo Layer
-- **Responsibilities**:
-    - Multi-threaded rendering
-    - Layout calculations
-    - GPU acceleration
-- **Integration**:
-    - Embedded as Rust library (`servo_embed`) inside a dedicated process or thread pool
-    - Communicates with Electron via IPC or native bindings
-- **Memory Access**:
-    - Uses WASM shared buffers for exchanging renderable data
-
-### 2.3 WebAssembly Layer
-- **Responsibilities**:
-    - CPU-heavy computation (physics, simulations, transformations)
-    - Data processing on large datasets
-- **Integration**:
-    - Loaded inside Node.js (Electron main process or worker threads)
-    - Preallocated `SharedArrayBuffer` for data exchange
-    - SIMD and multithreaded WASM compiled for performance
+**Objectives**:
+1. Enable CPU-bound tasks (agent logic, LLM inference preprocessing) with safe sandboxing.
+2. Enable GPU-bound tasks (matrix operations, tensor computations, LLM acceleration) using Servo WebGPU.
+3. Provide deterministic orchestration across multiple agents.
+4. Support optional UI monitoring without interfering with computation.
+5. Facilitate headless operation and local-first execution with no cloud dependencies.
 
 ---
 
-## 3. Data Flow & Communication
+# 2. Architectural Principles
+- **Hybrid Execution**: CPU tasks via WASM, GPU tasks via Servo WebGPU.
+- **Local-First**: All execution occurs locally; deterministic scheduling ensures reproducibility.
+- **Sandboxing & Isolation**: WASM workers and Servo GPU threads isolate agents and GPU workloads.
+- **Shared Memory**: Zero-copy shared buffers for efficient CPU-GPU communication.
+- **Asynchronous Execution**: Main orchestrator schedules tasks asynchronously to maximize CPU/GPU utilization.
+- **Optional UI Layer**: Decoupled from compute threads to avoid blocking or latency issues.
 
-- **Shared Memory Buffers**: Single source of truth for large data, avoids copying between WASM and Servo.
-- **IPC Channels**: Electron main ↔ renderer ↔ Servo handle control messages, task scheduling, and small metadata.
+---
+
+# 3. Core Components
+
+| Component | Role / Responsibility |
+| :--- | :--- |
+| **Electron Runtime** | Desktop runtime, Node.js orchestration, optional UI for monitoring; coordinates task scheduling and communication. |
+| **Main Orchestrator (Electron Main Process)** | Determines task type (CPU/GPU), schedules agents, maintains task queues, manages shared memory allocation. |
+| **WASM Worker Pool** | Runs CPU-bound agents or LLM preprocessing; isolated threads, communicates via shared memory buffers. |
+| **Servo Runtime (Embedded)** | Executes GPU-bound tasks asynchronously via WebGPU; dedicated WGPU thread and poller; receives tasks and buffers from orchestrator or WASM. |
+| **Shared Memory / Buffers** | Low-latency, zero-copy data exchange between WASM workers, Servo GPU, and orchestrator. |
+| **Optional UI / Monitoring Layer** | Visualizes agent status, GPU/CPU workloads, and logs; decoupled from compute threads. |
+| **Persistence / Storage (optional)** | Local storage for state, agent checkpoints, or long-term memory if required. |
+
+---
+
+# 4. Data and Task Flow
 
 ```mermaid
-graph TD
-%% Electron Layer
-subgraph Electron
-direction TB
-EM_Main["Main Process<br>Task Orchestrator & IPC Hub<br>Node.js APIs"]
-EM_Renderer["Renderer Process<br>UI DOM & IPC Client"]
-end
+flowchart TB
+    subgraph Desktop Runtime
+        Orchestrator[Main Orchestrator (Electron)]
+        WorkerPool[WASM Workers (CPU Tasks)]
+        ServoRuntime[Servo WebGPU (GPU Tasks)]
+        SharedMem[Shared Memory Buffers]
+        UI[Optional UI / Monitoring]
+    end
 
-%% WASM Computation Layer
-subgraph WASM_Workers
-direction TB
-WASM_Pool["Worker Thread Pool<br>#CPU Cores - 1"]
-end
-
-%% Servo Rendering Layer
-subgraph Servo_Engine
-direction TB
-Servo_Embed["Embedded Rust Library"]
-Servo_Threads["Internal Thread Pool"]
-Servo_GPU["GPU Acceleration"]
-Servo_Embed --> Servo_Threads
-Servo_Embed --> Servo_GPU
-end
-
-%% Shared Memory
-SharedMem["SharedArrayBuffer<br>Zero-Copy Buffers"]
-
-%% Connections
-EM_Main -->|Spawns & Manages| WASM_Pool
-EM_Main -->|Controls| Servo_Embed
-EM_Main -->|IPC Control/Update| EM_Renderer
-EM_Renderer -->|IPC Commands| Servo_Embed
-WASM_Pool -->|Read/Write Compute Buffers| SharedMem
-Servo_Embed -->|Read/Write Vertex/Layout Buffers| SharedMem
-EM_Renderer -->|Reads Result Buffers| SharedMem
-Servo_Embed -->|IPC Frame Ready| EM_Main
-
-%% Styles
-style EM_Main fill:#D6EAF8,stroke:#333,stroke-width:2px
-style EM_Renderer fill:#D6EAF8,stroke:#333,stroke-width:2px
-style WASM_Pool fill:#D5F5E3,stroke:#333,stroke-width:2px
-style Servo_Embed fill:#FDEDEC,stroke:#333,stroke-width:2px
-style SharedMem fill:#FEF9E7,stroke:#333,stroke-width:2px
+    Orchestrator --> WorkerPool
+    WorkerPool --> SharedMem
+    Orchestrator --> ServoRuntime
+    ServoRuntime --> SharedMem
+    WorkerPool --> ServoRuntime
+    UI --> Orchestrator
 ```
 
+**Explanation**:
+1. **Task Scheduling**: Orchestrator receives a task (e.g., agent logic or LLM inference).
+2. **CPU Tasks**: Sent to WASM workers; intermediate results stored in shared memory.
+3. **GPU Tasks**: GPU-bound tasks (matrix ops, tensor multiplications) sent to Servo WebGPU runtime.
+4. **Shared Memory**: Enables zero-copy data transfer between CPU and GPU tasks.
+5. **Result Aggregation**: Orchestrator collects results from WASM workers and Servo, optionally feeding into UI for visualization.
 
 ---
 
-## 4. Memory Architecture
-- `SharedArrayBuffer` used for both WASM and Servo.
-- **Memory layout example**:
-```
-+-------------------------+
-| Control / Metadata      |  <- small JS objects / flags
-+-------------------------+
-| Vertex / Layout Buffers |  <- Servo reads/writes
-+-------------------------+
-| Compute Buffers (WASM)  |  <- WASM reads/writes
-+-------------------------+
-| Result Buffers          |  <- Electron reads for UI
-+-------------------------+
-```
-- Preallocate buffers at startup; avoid dynamic resizing during runtime.
-- Access via `TypedArray`s for zero-copy interaction between WASM and JS.
+# 5. Component Interactions
+1. **Electron ↔ WASM Workers**:
+    - Orchestrator assigns CPU-bound tasks.
+    - Worker threads execute tasks asynchronously.
+    - Results stored in shared memory; orchestrator polls or subscribes for completion.
+2. **Electron ↔ Servo WebGPU**:
+    - Orchestrator submits GPU tasks and buffers.
+    - Servo handles async execution in WGPU thread; poller ensures GPU queue progresses.
+    - Results returned via shared memory for WASM or orchestrator consumption.
+3. **WASM ↔ Servo WebGPU**:
+    - Shared memory buffers used for input/output tensors.
+    - Asynchronous coordination; CPU preprocessing and GPU computation can run in parallel.
+4. **Optional UI ↔ Orchestrator**:
+    - Reads task queues, agent states, GPU workload metrics.
+    - Updates dashboards or logging without blocking compute threads.
 
 ---
 
-## 5. Task & Worker Management
-
-### 5.1 Worker Thread Pool
-- **Number of workers** = `#CPU cores - 1` (reserve one for Electron main)
-- **Responsibilities**:
-    - Load WASM module once per worker
-    - Batch CPU-heavy tasks
-    - Write results into shared buffers
-    - Task scheduling via queue in main process
-
-### 5.2 Servo Thread Pool
-- Servo manages its own threads for layout/rendering
-- Reads input buffers, writes output buffers
-- Notifies Electron main via IPC when rendering frames are ready
+# 6. Threading and Concurrency Model
+- **Electron Main Process**: Orchestrates scheduling, shared memory allocation, and inter-component communication.
+- **WASM Worker Threads**: Isolated, CPU-bound execution, handles multiple agents concurrently.
+- **Servo WGPU Thread + Poller Thread**: Async GPU task execution, decoupled from orchestrator; handles multiple compute pipelines in parallel.
+- **Optional UI Thread**: Independent rendering thread; reads shared memory and orchestrator state.
 
 ---
 
-## 6. Performance Considerations
-1.  **Minimize JS ↔ WASM crossings**
-    - Batch operations
-    - Use indices/pointers into shared memory instead of passing arrays
-2.  **Minimize IPC overhead**
-    - Only send metadata or signals, not large arrays
-    - Keep heavy data in shared buffers
-3.  **SIMD and multithreading**
-    - WASM compiled with `+simd128` and atomic memory operations
-    - Servo leverages GPU and CPU cores
-4.  **Non-blocking UI**
-    - All heavy computation offloaded to workers
-    - Electron main thread remains responsive
+# 7. Headless vs Non-Headless Operation
+
+| Mode | Role of Components |
+| :--- | :--- |
+| **Non-Headless (with UI)** | Electron orchestrator + WASM CPU tasks + Servo WebGPU; UI monitors status and metrics. |
+| **Headless (no UI)** | Electron orchestrator may be optional; WASM CPU tasks + Servo WebGPU continue to execute; no rendering required. |
+
+**Key Point**: Servo WebGPU remains useful in both modes, providing GPU acceleration regardless of UI presence.
 
 ---
 
-## 7. Example Initialization Workflow
-1.  Electron main process initializes:
-    - Worker thread pool
-    - Shared memory buffers
-    - Servo embedded engine
-2.  Renderer process initializes UI
-3.  WASM modules load into workers with access to shared buffers
-4.  Electron schedules tasks:
-    - Updates layout/render requests → Servo
-    - Sends CPU-heavy calculations → WASM workers
-5.  Data processed in parallel, results written to shared buffers
-6.  Renderer reads buffers to update UI
+# 8. Scalability and Extensibility
+- **Multi-agent scaling**: Add additional WASM worker threads for more agents; orchestrator queues tasks efficiently.
+- **GPU scaling**: Servo can handle multiple concurrent GPU tasks via async WGPU thread + poller.
+- **Extensible compute paths**: WASM and Servo layers allow swapping LLM models or adding new agents without rewriting orchestration logic.
+- **Optional modules**: Storage, logging, checkpointing, or human-in-the-loop control can be added without disrupting core architecture.
 
 ---
 
-## 8. Build & Deployment Strategy
-- **Rust/WASM**
-    - Compile WASM with `--release + SIMD + threading`
-    - Optimize with `wasm-opt -O3`
-- **Servo**
-    - Compile as Rust library for target OS
-- **Electron**
-    - Standard Electron build, preload WASM + Servo modules
-- **Cross-platform**
-    - All shared buffers and IPC mechanisms abstracted
+# 9. Design Considerations / Constraints
+- **Servo WebGPU is experimental**: GPU feature gaps may exist; careful testing required.
+- **Shared memory management**: Must avoid race conditions; proper memory synchronization and isolation required.
+- **WASM worker scheduling**: Task prioritization needed to avoid CPU bottlenecks.
+- **Electron UI**: Must be decoupled to prevent blocking CPU/GPU threads.
+- **Headless operation**: Orchestrator logic must work independently from UI threads.
 
 ---
 
-## 9. Future Enhancements
-- GPU acceleration for WASM (WebGPU via Electron)
-- Dynamic worker scaling based on CPU load
-- Advanced scheduling: prioritize rendering frames vs. computation
-- WASI integration for direct system access in WASM
+# 10. Summary
+
+This Master Architecture provides:
+- A hybrid CPU/GPU runtime for local-first LLM inference and multi-agent orchestration.
+- Support for both headless and UI-integrated operation.
+- High-performance execution via WASM workers and Servo WebGPU, coordinated by an Electron orchestrator.
+- Safe isolation, asynchronous execution, and extensibility for future modules.
