@@ -9,12 +9,6 @@ version: 2.0
 
 **Title**: Hybrid Runtime Architecture for Local-First Multi-Agent and WebLLM Compute
 
-**Status**: Revised / Engineering Review
-
-**Date**: 2025-12-13
-
-**Authors**: [Jules]
-
 ---
 
 ## 1. Context
