@@ -1,127 +1,146 @@
 ---
 Status: Approved
-Date: 2025-12-12
-Version: 1.0
+Date: 2025-12-15
+Version: 2.0
 Owners: [Engineering Team]
-Reviewers: [Engineering Team]
-Tags: [Architecture, Runtime, Node.js, WASM, ONNX]
+Reviewers: [CTO, Platform Architecture, ML Systems]
+Tags: [Architecture, Runtime, Node.js, WASM, ONNX, Determinism]
 ---
 
-# ADD: Hybrid Runtime Architecture for Multi-Agent Orchestration
-## Architecture Design Document
+# Architecture Design: A Deterministic Runtime for Multi-Agent Systems
 
-## 1. Overview
+## 1. Overview & Core Principles
 
-This document outlines the architecture for a local-first, multi-agent hybrid runtime. The system is designed for deterministic, high-performance execution of both CPU-bound and GPU-bound tasks, with a headless-first approach that supports an optional, decoupled user interface.
+This document defines the architecture for a local-first, high-performance runtime designed to orchestrate multiple, heterogeneous agents. The system is built on a foundation of determinism, security, and modularity, enabling reproducible execution of complex CPU and GPU workloads in a headless-first environment.
 
-This architecture is the result of a critical review of a previous proposal involving Servo WebGPU, which was rejected due to risks associated with its experimental nature.
+This design is guided by the following core principles:
 
-### Core Principles:
-- **Determinism**: All agent operations are repeatable and predictable.
-- **Safety**: The runtime guarantees memory safety and process isolation.
-- **Performance**: The architecture leverages GPU acceleration for intensive computations and multi-threading for CPU tasks.
-- **Modularity**: Components are loosely coupled, with a clear separation between core logic and the UI.
-- **Cross-Platform**: The system is designed to run on Linux, Windows, and macOS.
-
----
-
-## 2. System Components
-
-The architecture is composed of three primary components, orchestrated by a Node.js runtime.
-
-### 2.1 Node.js Orchestrator
-- **Description**: A standard Node.js process that serves as the central nervous system of the application.
-- **Responsibilities**:
-    - **Agent Lifecycle Management**: Spawning, terminating, and monitoring agents.
-    - **Deterministic Task Scheduling**: Managing task queues for all agents to ensure a reproducible order of execution. Supported strategies include round-robin and priority-based scheduling.
-    - **IPC Hub**: Acting as the central message broker between all components.
-    - **State Management**: Persisting and managing global application state.
-
-### 2.2 WebAssembly (WASM) Worker Pool
-- **Description**: A pool of Node.js `worker_threads`, each running a sandboxed WASM module.
-- **Responsibilities**:
-    - **CPU-Bound Agent Logic**: Executing the core application logic for each agent.
-    - **Sandboxed Execution**: Isolating agents from each other and the main orchestrator process to ensure security and stability.
-    - **High-Performance Computation**: Leveraging WASM's near-native performance for computationally intensive CPU tasks.
-
-### 2.3 ONNX Runtime
-- **Description**: A dedicated, production-ready inference engine for machine learning models.
-- **Responsibilities**:
-    - **GPU-Bound Inference**: Executing large language models (LLMs) and other ML models on the GPU.
-    - **CPU Fallback**: Automatically falling back to CPU-based inference if a compatible GPU is not available, ensuring the application runs on any hardware.
-    - **Model Management**: Loading, unloading, and managing different versions of ML models.
-
-### 2.4 Optional UI Layer (e.g., Servo)
-- **Description**: A completely decoupled graphical interface for visualization and monitoring.
-- **Responsibilities**:
-    - **Data Visualization**: Rendering the state of agents and the system.
-    - **User Interaction**: Providing controls for managing the application.
-- **Decoupling**: The UI runs in a separate process and communicates with the Node.js orchestrator via IPC. It has read-only access to application state and never interacts directly with the WASM workers or ONNX Runtime.
+*   **Deterministic Execution**: All agent operations, state changes, and communications are ordered and reproducible. The system guarantees "Ordering-Only Determinism" (see ADR-002), ensuring logical consistency without imposing brittle bit-level constraints.
+*   **Security through Sandboxing**: Agents are executed in isolated WebAssembly (WASM) environments, with a strict ABI and capability-based security model that prevents unauthorized access to system resources.
+*   **Performance via Specialization**: The architecture delegates tasks to specialized components: CPU-bound logic runs in a multi-threaded WASM pool, while GPU-intensive machine learning inference is handled by the highly optimized ONNX Runtime.
+*   **Modularity and Decoupling**: The core runtime is fully independent of any UI. An optional, read-only user interface can attach to the orchestrator for monitoring but is architecturally separate, ensuring the headless runtime remains lightweight and robust.
+*   **Cross-Platform Consistency**: The runtime is designed to provide identical behavior across Linux, Windows, and macOS.
 
 ---
 
-## 3. Data Flow & Communication
+## 2. System Architecture
 
-The system relies on two primary communication mechanisms to ensure both performance and safety.
-
-- **In-Process (Orchestrator ↔ WASM Workers)**: `SharedArrayBuffer` with `Atomics` is used for high-throughput, low-latency communication. This allows for zero-copy data exchange, which is critical for performance-sensitive tasks. All memory access is synchronized with `Atomics` to prevent race conditions.
-
-- **Cross-Process (Orchestrator ↔ UI / External Processes)**: For communication with the optional UI or other external systems, the orchestrator uses standard IPC mechanisms like WebSockets or sends data over memory-mapped files. This ensures a clean separation of concerns and prevents the UI from impacting the core runtime's stability.
+The runtime consists of three core components managed by a central orchestrator.
 
 ```mermaid
 graph TD
     subgraph Core Runtime
         direction LR
-        Orchestrator["Node.js Orchestrator<br>Deterministic Scheduler<br>IPC Hub"]
-        subgraph WASM Workers
+        Orchestrator["Node.js Orchestrator<br>Deterministic Scheduler & IPC Hub"]
+        subgraph WASM Agent Pool
             direction TB
             W1["WASM Worker 1"]
             W2["WASM Worker 2"]
-            W3["..."]
+            Wn["..."]
         end
-        ONNX["ONNX Runtime<br>GPU/CPU Inference"]
+        ONNX["ONNX Runtime<br>GPU/CPU Inference Engine"]
     end
 
-    subgraph Optional UI
+    subgraph Optional Components
         direction TB
-        UI["Decoupled UI (e.g., Servo)<br>Visualizations & Controls"]
+        UI["Decoupled UI (e.g., Servo)<br>Read-Only Visualizations & Controls"]
     end
 
-    %% Connections
-    Orchestrator -- "Spawns & Manages" --> WASM
-    Orchestrator -- "Manages Tasks" --> ONNX
-    Orchestrator -- "SharedArrayBuffer + Atomics" --> WASM
-    WASM -- "Request Inference" --> Orchestrator
+    Orchestrator -- "Manages & Schedules" --> WASM
+    Orchestrator -- "Delegates Inference Tasks" --> ONNX
+    Orchestrator -- "High-Speed Data Exchange" --> WASM
+    WASM -- "Request Inference via Orchestrator" --> Orchestrator
     Orchestrator -- "IPC (e.g., WebSockets)" --> UI
-
-    %% Styling
-    style Orchestrator fill:#D6EAF8,stroke:#333,stroke-width:2px
-    style WASM fill:#D5F5E3,stroke:#333,stroke-width:2px
-    style ONNX fill:#FDEDEC,stroke:#333,stroke-width:2px
-    style UI fill:#FEF9E7,stroke:#333,stroke-width:2px
 ```
 
+### 2.1. Node.js Orchestrator
+
+The orchestrator is the heart of the system, acting as the central nervous system.
+*   **Responsibilities**:
+    *   **Agent Lifecycle**: Spawns, monitors, and terminates WASM agents.
+    *   **Deterministic Scheduling**: Enforces a strict, reproducible execution order for all tasks using a logical clock and a configurable scheduling strategy (e.g., FIFO, priority-based).
+    *   **IPC Hub**: Brokers all communication between agents and other system components. Direct agent-to-agent communication is prohibited.
+    *   **State & Replay**: Manages global state and logs all events to enable deterministic replay.
+    *   **Security Enforcement**: Verifies agent signatures and enforces ABI and capability constraints.
+
+### 2.2. WebAssembly (WASM) Worker Pool
+
+This is where agent-specific, CPU-bound logic is executed.
+*   **Responsibilities**:
+    *   **Sandboxed Logic**: Runs agent code in isolated Node.js `worker_threads`.
+    *   **Resource Management**: Implements instruction metering and bounded step execution to prevent runaway processes.
+    *   **ABI Compliance**: Interacts with the orchestrator through a well-defined, secure ABI.
+
+### 2.3. ONNX Runtime
+
+This component is dedicated to high-performance machine learning inference.
+*   **Responsibilities**:
+    *   **GPU & CPU Inference**: Executes ML models, transparently using GPU acceleration where available and falling back to the CPU otherwise.
+    *   **Model Management**: Handles the lifecycle of ML models, including loading, caching, and versioning.
+    *   **Deterministic Mode**: Configured to use deterministic kernels where possible to support the system's reproducibility goals.
+
 ---
 
-## 4. Memory Architecture
+## 3. Execution & Determinism Model
 
-- **WASM Heap**: Each WASM worker has its own sandboxed linear memory.
-- **Shared Memory Region**: A pre-allocated `SharedArrayBuffer` is used as a common memory space for high-speed data exchange between the orchestrator and the WASM workers.
-- **Synchronization**: All access to the shared memory region is strictly controlled using `Atomics` to ensure thread safety.
-- **GPU Memory**: Managed entirely by ONNX Runtime. No direct memory access is performed from any other part of the system.
+Determinism is the cornerstone of this architecture, ensuring that for a given sequence of inputs, the system's behavior is perfectly reproducible.
 
----
-
-## 5. Build & Deployment
-
-- **WASM Compilation**: Agent code (e.g., written in Rust or C++) is compiled to WASM modules with multi-threading and SIMD support enabled.
-- **Node.js Environment**: The application is packaged as a standard Node.js project, with dependencies on `onnxruntime-node` and any other required libraries.
-- **Cross-Platform Builds**: The build process generates artifacts for each target platform (Linux, Windows, macOS), ensuring that the correct native binaries for ONNX Runtime are included.
+| Subsystem | Determinism Contract |
+| :--- | :--- |
+| **Scheduler** | A single, global event queue with a logical clock ensures a canonical ordering for all tasks, messages, and state transitions. |
+| **WASM Agents** | Execution is metered and bounded. Agents are pure functions of their inputs; any I/O or access to a wall-clock is prohibited and must be brokered by the orchestrator. |
+| **ONNX Runtime** | Provides functional reproducibility. CPU inference is bit-level deterministic. GPU inference, while not bit-level identical, produces semantically equivalent results. The CPU fallback guarantees a consistent baseline. |
+| **Communication** | All state-mutating communication flows through the orchestrator. Message order is guaranteed, and all interactions are logged for replay. |
 
 ---
 
-## 6. Future Enhancements
+## 4. Communication & Data Flow
 
-- **Advanced Scheduling**: Implementing more sophisticated scheduling algorithms, such as Directed Acyclic Graph (DAG) based scheduling for complex agent workflows.
-- **Dynamic Worker Scaling**: Adjusting the size of the WASM worker pool based on system load.
-- **WASI Integration**: Exploring the use of the WebAssembly System Interface (WASI) for more direct, yet still sandboxed, access to system resources from WASM modules.
+Communication is designed for both high performance and strict security.
+
+*   **Orchestrator ↔ WASM Agents**: A pre-allocated `SharedArrayBuffer` is used for zero-copy, high-speed data exchange. All access is synchronized with `Atomics` to prevent race conditions and ensure thread safety.
+*   **Orchestrator ↔ UI**: Communication with the optional UI occurs over a standard IPC mechanism like WebSockets or memory-mapped files. This is a pull-based model where the UI requests snapshots, ensuring it cannot block or impact the performance of the core runtime.
+
+---
+
+## 5. Agent ABI & Security Model
+
+The runtime enforces a strict security model for all agents.
+
+*   **ABI**: Agents must export a standard set of functions: `agent_init()`, `agent_step()`, `agent_receive()`, and `agent_shutdown()`.
+*   **Plugin Security**: All agent modules must be cryptographically signed. The orchestrator verifies signatures and checks a manifest of declared capabilities before loading an agent.
+*   **Sandboxing**: Agents have no direct access to the filesystem, network, or other OS resources. All such operations must be requested through the orchestrator, which acts as a broker.
+
+---
+
+## 6. Fault Tolerance & Resilience
+
+*   **Agent Isolation**: A crash or an exception in one agent is fully isolated to its worker thread. The orchestrator will trap the error, log it, and continue executing other agents.
+*   **Resource Metering**: The orchestrator uses instruction metering to preempt long-running or stuck agents, ensuring fairness and system stability.
+*   **Inference Fallback**: If the ONNX Runtime fails on the GPU, it automatically falls back to the CPU, ensuring the task completes successfully.
+
+---
+
+## 7. Performance & Reproducibility Targets
+
+| Metric | Target |
+| :--- | :--- |
+| Scheduler Tick Overhead | <10 ms per 50 agents |
+| Agent Step Latency | <5 ms under nominal workload |
+| Inference Variance | ±5% on GPU; 100% bit-level reproducibility on CPU |
+| Message Throughput | ≥10,000 messages/sec through the orchestrator |
+
+---
+
+## 8. Build & Deployment
+
+*   **Agent Compilation**: Agent code (e.g., in Rust or C++) is compiled to WASM with multi-threading and SIMD support enabled.
+*   **Runtime Packaging**: The application is a standard Node.js project, bundling the `onnxruntime-node` dependency and the appropriate native binaries for each target platform.
+
+---
+
+## 9. Future Enhancements
+
+*   **DAG-based Scheduler**: A v2 feature to support complex agent workflows with explicit dependencies.
+*   **Dynamic Worker Scaling**: Automatically adjust the size of the WASM worker pool based on system load.
+*   **Multi-Instance Federation**: Connecting multiple runtime instances to work in concert.
