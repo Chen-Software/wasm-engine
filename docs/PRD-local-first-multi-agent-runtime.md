@@ -1,237 +1,170 @@
 # Product Requirements Document (PRD)
 
-**Title**: Local-First Multi-Agent Runtime with Deterministic Orchestration and Optional UI
+**Title**: Shared Runtime for Local-First Multi-Agent Orchestration
 
-**Version**: 2025-12-12
-**Authors**: Architecture Team
-**Audience**: CTO, System Architects, Engineering Leads, Infrastructure Team, Runtime Team
-
----
-
-## 1. Purpose
-
-This product delivers a local-first, deterministic multi-agent runtime capable of running:
-- CPU-bound logic via WASM
-- GPU-bound inference via ONNX Runtime
-- Cross-platform (Windows, macOS, Linux)
-- Fully headless operation
-- Optional UI (Servo/Electron/WebAssembly-first) with zero performance impact
-
-The system must support multi-agent orchestration, hybrid compute, and an extensible plugin model for future agent types.
+**Status**: Draft for Review
+**Version**: 0.3
+**Date**: 2025-12-12
+**Audience**: CTO, Architecture, Engineering
+**Owners**: Engineering Team
+**Reviewers**: CTO, Platform Architecture, ML Systems
 
 ---
 
-## 2. Product Vision
+## 1. Product Summary
 
-A secure, deterministic, high-performance runtime for multi-agent AI systems that:
-- Runs entirely locally
-- Avoids dependency on cloud-hosted LLM APIs
-- Uses open standards (WASM, WebGPU, ONNX Runtime)
-- Provides predictable execution suitable for:
-  - research
-  - automation
-  - offline AI tools
-  - embedded systems
-- Supports optional visual debugging tools without sacrificing headless performance.
+We are building a shared execution runtime for a local-first, multi-agent system. The runtime must support deterministic, reproducible, and safe execution of heterogeneous agents—including CPU-bound decision logic and GPU-accelerated ML inference—while remaining operable in fully headless environments.
+
+This runtime is the substrate upon which all higher-level agent behaviors, tools, and UI components depend. It must provide a unified, stable contract for agent lifecycle, scheduling, communication, memory semantics, and compute abstraction.
 
 ---
 
-## 3. Goals and Non-goals
+## 2. Product Goals
 
-### 3.1 Goals
-1.  **Deterministic multi-agent orchestration**
-    - Reproducible task ordering
-    - Controlled concurrency
-    - Reliable scheduling semantics
-2.  **Hybrid compute pipeline**
-    - WASM for agent logic (CPU)
-    - ONNX Runtime for inference (GPU/CPU fallback)
-3.  **Local-first architecture**
-    - No runtime dependency on remote APIs
-    - Fully offline operation
-4.  **Headless-first runtime**
-    - No UI required for full system operation
-    - UI must be plug-in, optional, not performance-critical
-5.  **Extensible agent framework**
-    - Second-party and third-party agent modules
-    - Interfaces defined via WASM ABI + JSON schemas
-6.  **Cross-platform**
-    - Linux, Windows, macOS
-    - Consistent behavior across OSes
-
-### 3.2 Non-Goals
-- No cloud orchestration or distributed multi-node agent scheduling
-- No browser-bound environment as a primary runtime
-- No reliance on Electron or Servo unless UI is explicitly attached
-- No GPU compute in UI layer (purely visual)
+### 2.1 Primary Goals
+1.  **Deterministic Multi-Agent Execution**: Identical input sequences must yield identical global system behavior across runs and platforms.
+2.  **Unified Compute Framework**:
+    - CPU-bound logic executes in sandboxed WASM environments.
+    - GPU-bound inference is provided through ONNX Runtime with transparent CPU fallback.
+3.  **Local-First, Headless-First Operating Model**: The runtime must fully operate without UI or cloud connectivity. All visualization components must be optional and strictly decoupled.
+4.  **Cross-Platform Runtime Uniformity**: Behavior must remain consistent across Linux, Windows, and macOS.
 
 ---
 
-## 4. High-Level Architecture Overview
+## 3. Non-Goals (Explicit Exclusions)
 
-```
-                   ┌──────────────────────────────────────┐
-                   │          Node.js Orchestrator         │
-                   │  (Deterministic Multi-Agent Runtime)  │
-                   └──────────────────────────────────────┘
-                                │           │
-                                │           │
-                     ┌──────────┘           └──────────┐
-                     ▼                                 ▼
-     ┌───────────────────────────────┐   ┌──────────────────────────┐
-     │      WASM Worker Pool         │   │       ONNX Runtime       │
-     │   (CPU agent logic sandbox)   │   │   (GPU+CPU inference)    │
-     └───────────────────────────────┘   └──────────────────────────┘
-                     │                                 │
-                     │                                 │
-                     └───────── Optional UI Layer ─────┘
-                          (Servo, Electron, Web UI)
-```
-
-**Key Principles**:
-- Headless: Node.js orchestrator + WASM + ONNX Runtime
-- UI is optional, detachable, non-blocking
-- Orchestrator is the single source of truth for scheduling
+The runtime will not:
+- Provide distributed consensus or state replication across machines.
+- Expose host system APIs directly to agents.
+- Embed a graphical engine or act as a UI container.
+- Manage long-term storage or database persistence.
+- Provide agent-level access to GPU APIs beyond ONNX Runtime.
 
 ---
 
-## 5. Functional Requirements
+## 4. Product Requirements
 
-### 5.1 Agent Runtime Requirements
-- Execute N agents concurrently in deterministic order
-- Provide shared message bus with guaranteed ordering
-- Provide atomic and lock-free shared memory mechanisms
-- Agents must run fully sandboxed
+### 4.1 Functional Requirements
 
-### 5.2 WASM Execution
-- WASM modules compiled via WASI or custom ABI
-- Memory limits enforced per module
-- No WASM module may block the orchestrator thread
+#### 4.1.1 Agent Lifecycle Management
+The runtime must:
+- Initialize, activate, pause, resume, and terminate agents deterministically.
+- Enforce strict process isolation (no shared mutable state across agents).
+- Prevent agent faults from propagating beyond their WASM sandbox.
 
-### 5.3 GPU/CPU Inference
-- Use ONNX Runtime for:
-  - LLMs
-  - embedding models
-  - tensor compute
-- Automatic fallback to CPU if GPU unavailable
-- Deterministic model execution where applicable
+#### 4.1.2 Deterministic Scheduler
+The scheduler must:
+- Support priority-based and round-robin modes.
+- Guarantee reproducible task ordering under identical inputs.
+- Provide hooks for future DAG-based scheduling without breaking determinism.
 
-### 5.4 Orchestrator
-- Task queue with:
-  - FIFO
-  - priority queues
-- Predictable scheduling
-- Safe concurrency (no race conditions)
+#### 4.1.3 Shared Memory Model
+The runtime must provide:
+- A consistent `SharedArrayBuffer` + `Atomics` contract for high-throughput data exchange.
+- Defined data ownership rules (reader/writer semantics).
+- Zero-copy channels only within the orchestrator ↔ WASM domain.
 
-### 5.5 Optional UI
-UI must be:
-- Optional and attachable at runtime
-- Purely a visualization layer
-- Connected only through a unidirectional IPC API
+#### 4.1.4 Inter-Agent Communication
+- All communication flows through the orchestrator.
+- No agent may communicate directly with another agent.
+- Messages must be orderable, traceable, and replayable.
 
-UI frameworks supported:
-- Servo
-- Electron
-- WebAssembly-first standalone web UI
+#### 4.1.5 GPU/CPU Compute Abstraction
+- ML inference routes through ONNX Runtime only.
+- GPU acceleration is opportunistic; CPU fallback must preserve functional determinism.
+- Model loading/unloading must be managed centrally by the orchestrator.
 
-The core runtime must not depend on UI presence.
+#### 4.1.6 Optional UI Integration
+- UI processes may subscribe to a read-only state channel.
+- UI must not mutate agent state, memory, or scheduler configuration.
+- IPC boundaries must guarantee crash isolation.
 
----
+### 4.2 Non-Functional Requirements (NFRs)
 
-## 6. Non-functional Requirements
+#### 4.2.1 Reproducibility Guarantees
+The runtime must support:
+- Complete replay from logged agent inputs + scheduler events.
+- Identical behavior across repeated local runs.
 
-| Category | Requirement |
-| :--- | :--- |
-| **Performance** | <10 ms overhead for orchestrator tick |
-| **Latency** | Model inference latency must be GPU-bound |
-| **Isolation** | Full sandboxing of WASM modules |
-| **Security** | No shared raw pointers; structured cloning only |
-| **Portability** | Works on Linux, macOS, Windows |
-| **Determinism** | Reproducible agent execution order |
+#### 4.2.2 Performance and Latency
+- CPU agent execution times must remain bounded and predictable.
+- Inference latency variance (GPU/CPU) must be reported and bounded.
+- `SharedArrayBuffer` interactions must not block the Node.js event loop.
 
----
+#### 4.2.3 Cross-Platform Consistency
+- All features must behave identically across Linux, Windows, and macOS.
+- No OS-specific scheduling or GPU assumptions.
 
-## 7. APIs and Interfaces
+#### 4.2.4 Security & Isolation
+- WASM worker heaps must remain fully sandboxed.
+- No direct file, network, or OS access from WASM unless explicitly brokered.
 
-### 7.1 Agent Interface (WASM ABI)
-- `agent_init()`
-- `agent_step(context_ptr)`
-- `agent_receive(message_ptr)`
-- `agent_shutdown()`
-
-### 7.2 Orchestrator Messaging API
-- `publish(topic, message)`
-- `send(agentId, message)`
-- `joinChannel(agentId, channel)`
-
-### 7.3 UI Attachment API
-- WebSocket or IPC channel
-- Strictly read-only access to:
-  - agent state snapshots
-  - task queue
-  - logs and metrics
+#### 4.2.5 Fault Tolerance
+- Agent crashes must not destabilize the orchestrator.
+- Inference failures must degrade gracefully to CPU fallback.
 
 ---
 
-## 8. Risks & Mitigations
-
-| Risk | Mitigation |
-| :--- | :--- |
-| GPU differences across OS | ONNX Runtime backend selection with CPU fallback |
-| WASM memory corruption | Boundary checks + sandboxing per module |
-| UI performance impact | UI decoupled; never runs in orchestrator process |
-| Agent blocking behavior | WASM worker pool with time slicing |
-| Non-determinism | Orchestrator owns all scheduling decisions |
-
----
-
-## 9. Implementation Roadmap
+## 5. Architecture Overview (High-Level)
 
 ```mermaid
-flowchart TD
-  A[Phase 0: Foundations] --> B[Define WASM ABI + messaging schema]
-  B --> C[Build deterministic Node.js orchestrator]
-  C --> D[Implement WASM worker pool]
-  D --> E[Integrate ONNX Runtime with CPU/GPU support]
-  E --> F[Implement agent plugin system]
-  F --> G[Test headless mode end-to-end (no UI)]
+graph TD
+    O["Node.js Orchestrator<br>Deterministic Scheduler<br>State & IPC Hub"]
 
-  G --> H[Phase 1: Performance & Stability]
-  H --> I[GPU benchmarking & profiling]
-  I --> J[Deterministic scheduling validation suite]
-  J --> K[Cross-platform compatibility testing]
+    subgraph W["WASM Worker Pool"]
+        W1["WASM Worker 1"]
+        W2["WASM Worker 2"]
+        Wn["..."]
+    end
 
-  K --> L[Phase 2: Optional UI Layer]
-  L --> M[Define UI IPC interface]
-  M --> N[Implement Servo renderer or WebAssembly-first UI]
-  N --> O[Implement optional Electron fallback]
-  O --> P[End-to-end integration tests]
+    ONNX["ONNX Runtime<br>GPU/CPU Accelerator"]
 
-  P --> Q[Phase 3: Docs & Packaging]
-  Q --> R[Developer SDK + templates]
-  R --> S[Release 1.0 LTS]
+    UI["Optional UI<br>(Read-Only)"]
+
+    O --> W
+    O --> ONNX
+    O --> UI
+    W --> O
+    ONNX --> O
 ```
 
 ---
 
-## 10. Acceptance Criteria
-1. Headless runtime runs entirely without UI
-2. Agents execute deterministically across OSes
-3. WASM worker pool executes modules safely and concurrently
-4. ONNX Runtime performs inference with GPU acceleration when available
-5. UI can be attached/detached without affecting performance
-6. System can run offline indefinitely
-7. System supports multiple agents with stable scheduling
+## 6. Key Product Invariants (The “Contract”)
+
+These must hold in all implementations and future extensions:
+- Agents are isolated.
+- All scheduling is deterministic.
+- All mutable memory flows through the orchestrator.
+- GPU is optional; semantics are identical on CPU.
+- UI is optional; runtime remains headless-first.
+- Cross-platform builds behave identically.
+- Replay reproduces the same global state evolution.
 
 ---
 
-## 11. Appendix
+## 7. Acceptance Criteria
 
-**Related ADRs**
-- ADR-01: Shared Runtime Selection
-- ADR-02: Optional UI Design and Decoupling
+A release candidate of the runtime must demonstrate:
+1.  Deterministic replay of agent behavior across multiple runs.
+2.  Stable scheduling behavior under synthetic stress workloads.
+3.  WASM workers operating in full isolation without cross-heap mutation.
+4.  ONNX inference functioning identically with and without GPU availability.
+5.  Headless operation across Linux, Windows, macOS validated.
+6.  UI integration running in a separate process without impacting runtime.
+7.  No direct communication paths between agents.
 
-**Related Documents**
-- Master Architecture Document
-- Orchestrator Scheduling Specification
-- WASM ABI Reference
+---
+
+## 8. Open Questions / Risks
+- How should model versioning be governed (checksum, signature, semantic versioning)?
+- Do we need a concept of “agent capabilities” negotiated at startup?
+- Should DAG scheduling be introduced in v1 or held for a future release?
+
+---
+
+## 9. Future Extensions
+- Federation of multiple runtime instances.
+- WASI-based system integrations.
+- Dynamic scaling of WASM workers.
+- Multi-tenant agent sandboxes.
