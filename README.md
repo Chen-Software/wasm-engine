@@ -10,34 +10,35 @@ This project is currently in the **blueprint phase**. The architecture is well-d
 
 ### 2. Core Principles & Invariants
 
-The runtime is built on a set of non-negotiable architectural guarantees:
+The runtime is built on a set of non-negotiable architectural guarantees, as detailed in our **[Architecture Decision Records (ADRs)](./docs/adr/)**. Key principles include:
 
--   **Deterministic Execution:** All scheduling is deterministic. The exact same sequence of inputs will produce the exact same global state evolution, every time.
--   **Agent Isolation:** Agents (CPU-bound logic) execute in a sandboxed WASM environment. They are memory-isolated and cannot communicate directly with each other. All communication is brokered by the central orchestrator.
--   **Local-First & Headless-First:** The runtime has no dependency on cloud connectivity and is designed to operate without a graphical interface. UI is an optional, decoupled, read-only observer.
--   **Unified Compute Abstraction:** GPU-accelerated inference is provided opportunistically via ONNX Runtime. The runtime guarantees that the system's functional behavior remains identical when falling back to CPU.
+-   **Deterministic Execution:** All scheduling is deterministic to ensure reproducibility.
+-   **Agent Isolation:** Agents execute in a sandboxed WASM environment with no direct system access.
+-   **Local-First & Headless-First:** The runtime has no dependency on cloud connectivity and is designed to operate without a UI.
+-   **Unified Compute Abstraction:** ML inference is handled via ONNX Runtime to provide a consistent API for both CPU and GPU.
 
 ### 3. Project Documentation
 
-This repository contains the foundational documents that define the project's vision, architecture, and requirements.
+This repository is structured around a set of core documents that define the project's vision, architecture, and requirements.
 
--   **[Product Requirements Document (PRD)](./docs/prd-local-first-multi-agent-runtime.md):** Defines the "what" and "why." It outlines the product goals, non-goals, and the key invariants of the runtime.
--   **[Architecture Design Document (ADD)](./docs/ADD-electron-servo-wasm.md):** Defines the "how." This document details the technical implementation strategy, including the advanced patterns for memory management, threading, and communication.
--   **[Technical Analysis Report](./docs/llm-inference-architecture-analysis.md):** Provides the context and justification for the chosen architectural path by analyzing various alternatives for local LLM inference.
--   **[Critique of the PRD](./docs/prd-critique.md):** An architectural review of the product requirements, validating the design and identifying potential risks.
+-   **[Master Architecture Design Document](./docs/master-architecture-design-document.md):** The primary entry point for understanding the high-level system architecture. It provides an overview of the core components and contains the master index of all Architecture Decision Records (ADRs).
+-   **[Architecture Decision Records (ADRs)](./docs/adr/):** A directory containing the detailed rationale for every significant architectural decision in the project.
+-   **[Product Requirements Document (PRD)](./docs/prd-local-first-multi-agent-runtime.md):** Defines the "what" and "why" of the project, outlining goals, non-goals, and key invariants.
 
 ### 4. High-Level Roadmap
 
-1.  **Build & Integration:** Set up the build pipelines for Rust (Servo, WASM) and integrate the required native libraries (e.g., ONNX Runtime) into the orchestrator.
-2.  **Scheduler & Lifecycle:** Implement the deterministic scheduler and the core agent lifecycle management APIs.
-3.  **Memory & Communication:** Implement the shared memory manager and the orchestrator-brokered messaging system.
-4.  **Reference Implementation:** Create a minimal, end-to-end "hello world" multi-agent system to validate the core invariants.
+1.  **Implement Core ADRs:** Implement the designs specified in the "Approved" ADRs, including the core runtime, scheduler, and memory management.
+2.  **Develop Agent SDK:** Build out the Rust-based SDK to enable agent development.
+3.  **Reference Implementation:** Create a minimal, end-to-end multi-agent system to validate the core invariants.
 
 ### 5. Directory Structure
 ```
 .
-├── apps/                 # Main application code (e.g., Electron-based UI)
-├── docs/                 # All project documentation (PRD, ADD, etc.)
-├── packages/             # Reusable modules (e.g., WASM agent ABI)
+├── apps/                 # Optional UI applications
+├── docs/                 # All project documentation
+│   ├── adr/              # Architecture Decision Records
+│   ├── master-architecture-design-document.md
+│   └── prd-local-first-multi-agent-runtime.md
+├── packages/             # Reusable modules (e.g., Agent SDK)
 └── README.md
 ```

@@ -106,26 +106,8 @@ The runtime must support:
 ---
 
 ## 5. Architecture Overview (High-Level)
-```mermaid
-graph TD
-    O["Node.js Orchestrator<br>Deterministic Scheduler<br>State & IPC Hub"]
 
-    subgraph W["WASM Worker Pool"]
-        W1["WASM Worker 1"]
-        W2["WASM Worker 2"]
-        Wn["..."]
-    end
-
-    ONNX["ONNX Runtime<br>GPU/CPU Accelerator"]
-
-    UI["Optional UI<br>(Read-Only)"]
-
-    O --> W
-    O --> ONNX
-    O --> UI
-    W --> O
-    ONNX --> O
-```
+The high-level system architecture, component breakdown, and detailed rationale are documented in the **[Master Architecture Design Document](./master-architecture-design-document.md)**.
 
 ---
 
