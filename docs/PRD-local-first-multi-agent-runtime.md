@@ -168,3 +168,17 @@ A release candidate of the runtime must demonstrate:
 - WASI-based system integrations.
 - Dynamic scaling of WASM workers.
 - Multi-tenant agent sandboxes.
+
+---
+
+## 10. Appendix
+
+### 10.1 Related Documents
+-   **[Master Architecture Design (MAD)](./MAD-hybrid-runtime-architecture.md)**
+-   **[Technical Critique of the PRD](./critique-of-prd.md)**
+
+### 10.2 Related ADRs
+This PRD is supported by the following architectural decisions. For a full index, see the Master Architecture Design.
+-   **ADR-001**: Shared Runtime Architecture (Node.js + WASM + ONNX)
+-   **ADR-002**: Ordering-Only Determinism
+-   **ADR-008**: Optional UI Framework

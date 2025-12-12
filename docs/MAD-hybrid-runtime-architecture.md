@@ -1,113 +1,269 @@
----
-title: Hybrid Local-First Runtime Architecture for Multi-Agent Systems and WebLLM
-status: Revised / Engineering Review
-date: 2025-12-13
-authors: [Jules]
----
+# Master Architecture Design Document (ADD)
 
-# 1. Overview
-
-This document describes the revised high-level technical architecture of a local-first hybrid runtime for multi-agent orchestration and LLM inference. The core change is the adoption of ONNX Runtime for GPU compute to ensure deterministic scheduling and robust headless operation, a critical requirement for multi-agent systems.
-
-**Objectives**:
-1.  Enable CPU-bound tasks (agent logic) with safe sandboxing via **WASM**.
-2.  Enable GPU-bound tasks (LLM inference) using a reliable, cross-platform solution: **ONNX Runtime**.
-3.  Provide deterministic, turn-based orchestration for multiple agents.
-4.  Support an **optional, decoupled UI** for monitoring without interfering with the core runtime.
-5.  Ensure robust headless operation with no cloud dependencies.
+**Title:** Local-First Deterministic Multi-Agent Runtime
+**Status:** Proposed
+**Version:** 0.1
+**Date:** 2025-12-17
+**Owners:** Engineering Team
+**Reviewers:** CTO, Platform Architecture, Runtime Architects, ML Systems
+**Tags:** Architecture, Runtime, Node.js, WASM, ONNX, Electron, WebGPU
 
 ---
 
-# 2. Architectural Principles
--   **Deterministic Orchestration**: The Electron/Node.js main process acts as a central orchestrator, managing a predictable task queue for all agents.
--   **Hybrid Execution**: CPU-bound tasks are executed by WASM workers; GPU-bound tasks are offloaded to the ONNX Runtime.
--   **Sandboxing & Isolation**: Agents running in WASM workers are isolated. The ONNX runtime manages its own execution context, separate from the main orchestrator.
--   **Shared Memory**: Zero-copy shared buffers are used for efficient data exchange between the orchestrator, WASM workers, and the ONNX runtime.
--   **Decoupled UI**: The visualization layer (e.g., implemented with Servo) is optional and does not participate in the core computation loop, preventing UI-related performance issues.
+## 1. Overview
+
+This document consolidates the architecture of a **local-first, deterministic multi-agent runtime**. It provides a single reference for:
+
+* Core runtime orchestration (Node.js + WASM + ONNX Runtime)
+* Deterministic scheduling, memory safety, and agent execution contracts
+* Optional decoupled UI layer
+* Modular ADR-driven decision records for architectural clarity
+
+**Key Architectural Principles:**
+
+1. **Deterministic Execution:** Reproducible agent task ordering and state transitions.
+2. **Isolation & Security:** WASM sandboxing, signed plugins, and controlled GPU/CPU access.
+3. **Performance:** Multi-threaded CPU execution, GPU acceleration for inference.
+4. **Modularity:** Loosely coupled subsystems; optional UI decoupled from core runtime.
+5. **Cross-Platform:** Linux, Windows, macOS support.
 
 ---
 
-# 3. Core Components
+## 2. Core Components
 
-| Component | Role / Responsibility |
-| :--- | :--- |
-| **Electron/Node.js Runtime** | The primary runtime. The Node.js process orchestrates agent tasks, manages the task queue, and allocates shared memory. |
-| **Main Orchestrator** | A module within the main process that implements deterministic, turn-based scheduling for agents. |
-| **WASM Worker Pool** | Executes CPU-bound agent logic in isolated worker threads. Communicates via shared memory buffers. |
-| **ONNX Runtime** | Manages and executes GPU-bound inference tasks. Provides automatic CPU fallback, ensuring headless operation is reliable. |
-| **Shared Memory Buffers** | Enables low-latency, zero-copy data transfer between the orchestrator, WASM workers, and the ONNX Runtime. |
-| **Optional UI (Servo)** | A completely decoupled component for advanced real-time visualization of agent states and runtime metrics. |
+### 2.1 Node.js Orchestrator
+
+* Central scheduler (FIFO/priority; DAG deferred to v2)
+* Task queue management with deterministic tick clock
+* Agent lifecycle management
+* Plugin/ABI enforcement and versioning
+* Replay logging and deterministic event tracking
+* Interface to Model Management Service
+
+### 2.2 WASM Worker Pool
+
+* Executes CPU-bound agent logic in isolated threads
+* Instruction metering and bounded step execution
+* Communication via `SharedArrayBuffer` + `Atomics` with orchestrator
+* No direct OS/GPU access
+
+### 2.3 ONNX Runtime
+
+* Executes GPU-bound inference with deterministic kernels
+* CPU fallback for environments without GPU
+* Centralized model management (load, unload, cache, versioning)
+* Replayable inference requests logged
+
+### 2.4 Optional UI Layer
+
+* Fully decoupled, read-only visualization and monitoring
+* IPC communication via WebSockets or memory-mapped files
+* Never directly interacts with WASM or ONNX Runtime
 
 ---
 
-# 4. Data and Task Flow
+## 3. Data Flow & Communication
+
+### In-Process
+
+* Orchestrator ↔️ WASM via `SharedArrayBuffer` + `Atomics`
+* Zero-copy, thread-safe, deterministic memory access
+
+### Cross-Process
+
+* Orchestrator ↔️ UI via IPC (WebSockets, memory-mapped files)
+* Pull-based snapshots to avoid blocking orchestrator
+
+### Message Ordering & Replay
+
+* Guaranteed per topic
+* Backpressure applied when queues full
+* Event logs support deterministic replay
 
 ```mermaid
-flowchart TB
-    subgraph Core Runtime
-        Orchestrator[Main Orchestrator (Electron/Node.js)]
-        WorkerPool[WASM Workers (CPU Tasks)]
-        ONNX[ONNX Runtime (GPU Tasks)]
-        SharedMem[Shared Memory Buffers]
+graph TD
+    O["Node.js Orchestrator<br>Scheduler & IPC Hub"]
+    subgraph W["WASM Worker Pool"]
+        W1["Worker 1"]
+        W2["Worker 2"]
+        Wn["..."]
     end
+    ONNX["ONNX Runtime<br>GPU/CPU Inference"]
+    UI["Optional UI<br>Read-Only"]
 
-    subgraph Optional Decoupled UI
-        ServoUI[Servo for Visualization]
-    end
-
-    Orchestrator --> WorkerPool
-    WorkerPool --> SharedMem
-    Orchestrator --> ONNX
-    ONNX --> SharedMem
-    Orchestrator -- Observes --> SharedMem
-    Orchestrator -- Pushes State --> ServoUI
+    O --> W
+    O --> ONNX
+    O --> UI
+    W --> O
+    ONNX --> O
 ```
 
-**Explanation**:
-1.  **Task Scheduling**: The Orchestrator dequeues a task for an agent.
-2.  **CPU Execution**: CPU-bound logic is sent to a WASM worker, which writes results to a shared memory buffer.
-3.  **GPU Execution**: If the task requires LLM inference, the Orchestrator passes the relevant data (via shared memory) to the ONNX Runtime for execution.
-4.  **Deterministic Control**: The Orchestrator waits for the current task to complete (either from WASM or ONNX) before scheduling the next task, ensuring a predictable execution order.
-5.  **UI Updates**: The Orchestrator can optionally push state updates to the Servo UI for visualization.
+---
+
+## 4. Memory & Resource Management
+
+* WASM heaps: isolated per worker
+* Shared memory synchronized via `Atomics`
+* GPU memory managed solely by ONNX Runtime
+* Node.js orchestrator monitors CPU and memory usage
 
 ---
 
-# 5. Component Interactions
-1.  **Orchestrator ↔ WASM Workers**: The orchestrator dispatches tasks and memory buffers to workers and is notified upon completion.
-2.  **Orchestrator ↔ ONNX Runtime**: The orchestrator initiates inference sessions with the ONNX Runtime, passing input tensors and receiving outputs via shared memory.
-3.  **Orchestrator ↔ Optional UI (Servo)**: The orchestrator sends read-only data or metrics to the UI layer for visualization. The UI has no direct access to the computation pipeline.
+## 5. Determinism Contracts
+
+| Subsystem          | Guarantee |
+|-------------------|-----------|
+| Scheduler          | Linear FIFO/priority queue; DAG deferred v2; tick clock ensures reproducibility |
+| WASM Agent         | Bounded, metered execution; deterministic outputs per identical input |
+| ONNX Runtime       | CPU deterministic; GPU deterministic if possible; functional consistency |
+| Messaging & Memory | All mutable state flows through orchestrator; SharedArrayBuffer + Atomics; replayable messages |
+
+**Ordering-Only Determinism** is applied across federated multi-agent execution (ADR-002).
 
 ---
 
-# 6. Threading and Concurrency Model
--   **Electron Main Process**: Single-threaded event loop for orchestration, ensuring deterministic task scheduling.
--   **WASM Worker Threads**: A pool of isolated threads for parallel execution of CPU-bound agent logic.
--   **ONNX Runtime Threads**: Manages its own internal thread pool for executing GPU kernels and coordinating device memory transfers.
--   **Servo UI Thread**: If used, Servo runs in its own process/thread, completely decoupled from the core runtime's threads.
+## 6. Agent ABI & Plugin Model
+
+* ABI v1: `agent_init()`, `agent_step()`, `agent_receive()`, `agent_shutdown()`
+* Plugin signing, capability declarations, orchestrator-enforced versioning
+* No direct OS or GPU access; all interactions brokered via orchestrator
 
 ---
 
-# 7. Headless vs Non-Headless Operation
+## 7. Model Management & Inference
 
-| Mode | Role of Components |
-| :--- | :--- |
-| **Non-Headless (with UI)** | The full stack is active: Electron/Node.js orchestrator, WASM workers, ONNX Runtime, and the optional Servo UI for visualization. |
-| **Headless (no UI)** | The core runtime (Orchestrator, WASM, ONNX) runs without any UI. ONNX's CPU fallback ensures it operates reliably even without a GPU context. |
-
----
-
-# 8. Design Considerations / Constraints
--   **ONNX Runtime Dependency**: The build and packaging process must include the ONNX Runtime library for all target platforms.
--   **Deterministic Scheduling**: The orchestrator must be carefully designed to prevent race conditions and ensure a strict, turn-based execution flow for agents.
--   **Shared Memory Management**: Requires robust synchronization mechanisms (`Atomics`) to prevent data corruption between processes.
--   **UI Decoupling**: The interface between the orchestrator and the optional Servo UI must be strictly enforced to prevent the UI from impacting runtime performance.
+* Managed centrally by orchestrator or model service
+* Model caching, load/unload, version tracking
+* Deterministic execution enforced, CPU fallback preserves functional outputs
+* GPU inference variance ±5%, CPU fully deterministic
 
 ---
 
-# 9. Summary
+## 8. Fault Handling
 
-This revised Master Architecture provides:
--   A **deterministic and reliable** runtime for multi-agent orchestration using Electron/Node.js.
--   High-performance CPU and GPU execution via **WASM workers** and the **ONNX Runtime**.
--   Guaranteed support for **headless operation**.
--   A clear separation between the core runtime and an **optional, decoupled visualization layer (Servo)**.
+* Isolated agent crashes
+* WASM worker preemption via instruction metering
+* ONNX inference fallback to CPU
+* Deterministic logging for replay and debugging
+
+---
+
+## 9. Performance & Reproducibility Targets
+
+| Metric | Target |
+|--------|--------|
+| Scheduler tick overhead | <10 ms per 50 agents |
+| CPU agent step | <5 ms |
+| ONNX inference variance | ±5% GPU, CPU bit-level reproducibility |
+| Message throughput | ≥10k msgs/sec via orchestrator |
+
+---
+
+## 10. Build & Deployment
+
+* Compile agent code to WASM (Rust/C++), multi-threaded + SIMD enabled
+* Node.js runtime packaged with required dependencies (`onnxruntime-node`)
+* Cross-platform builds include correct ONNX binaries for Linux, Windows, macOS
+
+---
+
+## 11. Optional UI
+
+* Servo: lightweight Rust-native UI for visualization
+* Electron: full-featured UI if rich ecosystem is needed
+* Always decoupled from compute; read-only, optional attachment
+
+---
+
+## 12. ADR References & Modular Decisions
+
+adr_index:
+  - id: ADR-001
+    title: "Shared Runtime (Node.js + WASM + ONNX)"
+    status: "Approved"
+    scope: "Core orchestrator, CPU/GPU execution, optional UI"
+
+  - id: ADR-002
+    title: "Ordering-Only Determinism"
+    status: "Proposed"
+    scope: "Scheduler & replay determinism"
+
+  - id: ADR-003
+    title: "Scheduler Tick Granularity"
+    status: "Proposed"
+    scope: "Logical tick duration, max tasks per tick"
+
+  - id: ADR-004
+    title: "Shared Memory Ownership Rules"
+    status: "Proposed"
+    scope: "Single-writer, multi-reader policies"
+
+  - id: ADR-005
+    title: "Plugin Signing & ABI Enforcement"
+    status: "Proposed"
+    scope: "Module security and ABI versioning"
+
+  - id: ADR-006
+    title: "Performance & Latency Targets"
+    status: "Proposed"
+    scope: "Metrics for CPU/GPU and messaging"
+
+  - id: ADR-007
+    title: "Logging Format & Serialization"
+    status: "Proposed"
+    scope: "Deterministic event serialization"
+
+  - id: ADR-008
+    title: "Optional UI Framework"
+    status: "Proposed"
+    scope: "Servo vs Electron usage, decoupling"
+
+  - id: ADR-009
+    title: "Model Caching & GPU Memory Policy"
+    status: "Proposed"
+    scope: "LRU caching, preloading heuristics"
+
+  - id: ADR-010
+    title: "Agent SDK & Toolchain"
+    status: "Proposed"
+    scope: "Languages, debugging, compliance tools"
+
+  - id: ADR-011
+    title: "Fault Injection & Stress Testing"
+    status: "Proposed"
+    scope: "Crash recovery and validation scenarios"
+
+  - id: ADR-012
+    title: "Cross-Platform Build & Packaging"
+    status: "Proposed"
+    scope: "Platform-specific artifacts and dependencies"
+
+  - id: ADR-013
+    title: "DAG Scheduler v2 Guidelines"
+    status: "Proposed"
+    scope: "Task objects, dependencies, v2 extensions"
+
+---
+
+## 13. Future Enhancements
+
+* DAG-based scheduling (v2)
+* Dynamic WASM worker scaling
+* Multi-instance federation
+* Multi-tenant agent sandboxes
+* WASI integration
+* Optional WebGPU/Dawn compute acceleration
+
+---
+
+## 14. References
+
+* [ONNX Runtime Documentation](https://onnxruntime.ai/docs/)
+* [WebAssembly Threads and Atomics (MDN)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly)
+* [Node.js Worker Threads](https://nodejs.org/api/worker_threads.html)
+* ADR-001 → ADR-013
+
+---
+
+**Notes:**
+This master ADD is **modular** and ADR-driven, allowing each decision to be referenced independently. New ADRs can be added incrementally as the runtime evolves, making the document maintainable and reviewable for architecture and engineering teams.

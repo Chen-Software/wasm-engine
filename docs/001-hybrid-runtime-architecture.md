@@ -1,112 +1,148 @@
+ADR-001 — Shared Runtime Architecture (Node.js + WASM + ONNX Runtime)
+
 ---
-status: Revised
-date: 2025-12-13
-authors: [Jules]
-version: 2.0
----
-
-# Architecture Decision Record (ADR)
-
-**Title**: Hybrid Runtime Architecture for Local-First Multi-Agent and WebLLM Compute
-
+id: ADR-001
+title: "Shared Runtime Architecture (Node.js + WASM + ONNX Runtime)"
+status: "Approved"
+date: 2025-12-17
+related:
+  - ADR-002
+  - ADR-003
+  - ADR-004
+  - ADR-005
+  - ADR-007
+  - ADR-008
+tags:
+  - runtime
+  - wasm
+  - onnx
+  - deterministic-execution
 ---
 
 ## 1. Context
 
-This ADR revises the previous decision regarding the GPU compute runtime. The goal remains to build a local-first, high-performance runtime for multi-agent orchestration and local LLM inference. However, a technical assessment revealed that Servo is unsuitable for the core runtime due to concerns about deterministic scheduling and safety in a multi-agent context.
+The project requires a local-first, deterministic multi-agent runtime capable of:
+	•	High performance CPU + GPU inference
+	•	Deterministic scheduling and replay
+	•	Strict isolation for agents
+	•	A long-term ecosystem aligned with open standards (WASM, ONNX, WebGPU)
+	•	Optional UI that does not degrade compute performance
+	•	Cross-platform operation (Linux, macOS, Windows)
 
-The runtime must:
-1.  Support CPU-bound computation (agent logic, inference) efficiently and safely.
-2.  Support GPU-bound computation (matrix-heavy operations) reliably and deterministically.
-3.  Operate in a headless mode without requiring a UI or rendering context.
-4.  Ensure deterministic scheduling, low-latency communication, and safe sandboxing for multiple agents.
+Two competing runtime approaches were considered:
+	1.	Pure Node.js acting as the entire compute and orchestration layer
+	2.	Hybrid runtime combining Node.js, WASM workers, and ONNX Runtime
 
----
+Additional UI frameworks (Servo/Electron) were evaluated, but they are explicitly decoupled from this decision.
+
+The architecture must support:
+	•	High concurrency (dozens–hundreds of agents)
+	•	Deterministic ticks + ordered state transitions
+	•	Isolation via WASM
+	•	GPU acceleration without compromising determinism contracts
+	•	A stable plugin ABI for agent authors
 
 ## 2. Decision
 
-Adopt a hybrid runtime architecture orchestrated by **Electron/Node.js** that combines:
-1.  **Electron/Node.js** as the primary runtime for deterministic task scheduling and orchestration.
-2.  **WebAssembly (WASM)** modules running in worker threads for CPU-bound agent logic.
-3.  **ONNX Runtime** for GPU-bound inference tasks, providing reliable execution and automatic CPU fallback.
-4.  **Servo** as an **optional and decoupled UI layer** for advanced visualizations only. It will not participate in the core agent computation or orchestration pipeline.
+The runtime will adopt a hybrid architecture, consisting of:
 
----
+### 2.1 Node.js as the Primary Orchestrator
+	•	Scheduler, tick clock, replay logs
+	•	Capability enforcement and plugin ABI
+	•	Inter-process communication (IPC) with UI (if present)
+	•	Routing inference requests to ONNX Runtime
+	•	Managing deterministic message queues
+
+### 2.2 WASM Worker Pool (Rust/C++ compiled to WASM)
+	•	Executes agent logic deterministically
+	•	Sandboxed, isolated memory heaps
+	•	Communication via SharedArrayBuffer + Atomics
+	•	Metered and bounded instruction execution
+	•	No direct system or GPU access
+
+### 2.3 ONNX Runtime
+	•	High-performance inference (WebGPU/DML/CUDA/CPU)
+	•	Deterministic CPU execution
+	•	GPU variants acceptable with minor nondeterministic variance
+	•	Central model cache + GPU memory handler
+	•	Orchestrator-controlled access via RPC-like API
+
+### 2.4 Optional UI Layer (Out of Scope for ADR-001)
+
+Covered under ADR-008.
+UI has zero influence on runtime performance or determinism.
 
 ## 3. Rationale
 
-The decision is based on the need for a deterministic and safe shared runtime, which Electron/Node.js provides, while the previous choice (Servo) introduced significant risks.
+This architecture is selected because it uniquely satisfies the system constraints:
 
-| Requirement | Why this approach |
-| :--- | :--- |
-| **Deterministic Scheduling** | The Node.js event loop, controlled by a central orchestrator, allows for predictable, turn-based scheduling of agent tasks. |
-| **Safe Shared Memory / IPC** | Node.js provides robust mechanisms to safely coordinate `SharedArrayBuffer` and `Atomics` between WASM workers. |
-| **Concurrency Control** | The orchestrator can manage explicit task queues for both CPU (WASM) and GPU (ONNX) workloads, preventing conflicts. |
-| **Headless Support** | Node.js is designed for headless operation. ONNX Runtime's CPU fallback ensures GPU tasks can run without a rendering context. |
-| **Reliable GPU Compute** | ONNX Runtime is a mature, cross-platform library for GPU inference that guarantees deterministic execution. |
+### 3.1 Determinism Requirements
 
----
+Pure Node.js cannot guarantee deterministic execution across threads.
+WASM + Atomics provides:
+	•	Deterministic execution paths
+	•	Isolated heaps
+	•	Replayable steps
+	•	Instruction metering
 
-## 4. Architecture Overview
+### 3.2 Compute Performance
 
-The core runtime consists of the Electron/Node.js orchestrator, WASM workers for CPU tasks, and ONNX Runtime for GPU tasks. Servo is an optional, external component for UI only.
+WASM handles CPU-bound agent logic efficiently.
+ONNX Runtime provides:
+	•	GPU acceleration
+	•	Multi-threaded CPU inference
+	•	Cross-platform parity
+	•	ML model determinism guarantees
 
-```mermaid
-flowchart LR
-    subgraph Core Runtime (Electron/Node.js)
-        MainProcess[Main Orchestrator]
-        WorkerPool[WASM Worker Pool for CPU tasks]
-        ONNXRuntime[ONNX Runtime for GPU tasks]
-        SharedMem[Shared Memory / Buffers]
-    end
+Node.js alone cannot match this performance profile.
 
-    subgraph Optional UI
-        ServoUI[Servo for Visualization]
-    end
+### 3.3 Cross-Platform Reliability
 
-    MainProcess --> WorkerPool
-    WorkerPool --> SharedMem
-    MainProcess --> ONNXRuntime
-    ONNXRuntime --> SharedMem
-    MainProcess --> ServoUI
-```
+The hybrid model provides consistent behavior across:
+	•	Linux — primary target
+	•	macOS — development and testing
+	•	Windows — enterprise adoption
 
----
+### 3.4 Extensibility & Security
 
-## 5. Consequences
+The ABI plugin model ensures:
+	•	Capability-based restrictions
+	•	Zero direct OS or GPU access for agents
+	•	Versioned agent interfaces
 
-**Benefits**:
--   **Deterministic Orchestration**: Ensures reproducible behavior for multi-agent systems.
--   **High Reliability**: Uses mature technologies (Node.js, WASM, ONNX) for the core runtime.
--   **Robust Headless Mode**: Guaranteed to run without a UI, with CPU fallback for GPU tasks.
--   **Safe Concurrency**: Clear separation of concerns and controlled access to shared resources.
--   **Cross-Platform Consistency**: The chosen stack is well-supported on Windows, macOS, and Linux.
+Pure Node.js allows unbounded agent behavior unless extensively sandboxed.
 
-**Trade-offs / Risks**:
--   **New Dependency**: Adds ONNX Runtime to the project, which will need to be managed.
--   **UI Complexity**: If advanced visualizations are required, managing a decoupled Servo instance adds architectural overhead.
+### 3.5 Future Evolution
 
----
+The architecture supports:
+	•	DAG scheduler upgrade (ADR-013)
+	•	Shared memory ownership policy (ADR-004)
+	•	Model caching and GPU memory policy (ADR-009)
+	•	Fault injection and reproducible debugging (ADR-011)
 
-## 6. Alternatives Considered
+## 4. Consequences
 
-| Option | Pros | Cons |
-| :--- | :--- | :--- |
-| **Electron + WASM + Servo (for GPU)** | Proposed leveraging Servo's rendering engine for GPU tasks. | Unsafe for deterministic scheduling, unreliable headless mode, and unproven shared memory model for agent orchestration. **Rejected due to high risk.** |
-| **Node.js + Native GPU Libs** | Offers the highest possible performance for GPU compute. | Platform-specific, significantly increases packaging complexity, and creates a higher maintenance burden. |
-| **Electron + WASM only** | Simple and stable stack. | Lacks reliable, cross-platform GPU acceleration for LLM tasks. |
+### 4.1 Positive
+	•	Deterministic multi-agent orchestration
+	•	High-performance inference capabilities
+	•	Full isolation of untrusted agent logic
+	•	Modular, ADR-driven evolution path
+	•	Optional UI with zero runtime impact
+	•	Reproducible execution logs and debugging
+	•	Aligned with open standards (WASM, ONNX, WebGPU, Node.js)
 
----
+### 4.2 Negative
+	•	More complex build system (WASM + Node + ONNX)
+	•	Multi-language toolchain increases onboarding complexity
+	•	Higher initial engineering investment
+	•	Requires memory-safe languages for WASM components
+	•	More maintenance around ABI versioning
 
-## 7. Next Steps
-1.  Prototype the `Electron + WASM + ONNX Runtime` integration with a simple LLM inference pipeline.
-2.  Define the API and data transfer conventions between the Node.js orchestrator and the ONNX Runtime.
-3.  Implement a deterministic task scheduler in the main orchestrator to manage the agent task queue.
-4.  Document the shared memory layout and synchronization mechanisms.
-5.  (Optional) Design the decoupled interface for the Servo visualization layer to consume data from the core runtime.
+### 4.3 Neutral / Trade-offs
+	•	GPU inference determinism ≠ CPU-bitwise determinism
+	•	IPC complexity increases slightly but improves modularity
+	•	UI must always remain optional and isolated
 
----
+## 5. Status
 
-**Decision Owner**: [Jules]
-
-**Reviewers**: Engineering Team
+Approved and referenced in the Master Architecture Design Document (ADD).

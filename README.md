@@ -51,7 +51,7 @@ The key components are:
 This repository contains the complete architectural and product documentation for the Wasm-Engine. For a deep dive into the system's design and goals, please refer to the following key documents:
 
 -   **[Product Requirements Document (PRD)](./docs/PRD-local-first-multi-agent-runtime.md)**: Defines the product vision, goals, and functional requirements.
--   **[Master Architecture Design (MAD)](./docs/MAD-hybrid-runtime-architecture.md)**: Provides the high-level technical architecture and design principles.
+-   **[Master Architecture Design (MAD)](./docs/MAD-hybrid-runtime-architecture.md)**: Provides the high-level technical architecture and contains the **full index of all Architecture Decision Records (ADRs)**.
 -   **[Architecture Decision Record (ADR-001)](./docs/001-hybrid-runtime-architecture.md)**: Justifies the core architectural decision to use ONNX Runtime over other alternatives.
 -   **[Technical Critique of the PRD](./docs/critique-of-prd.md)**: A deep-dive analysis of the architectural implications and second-order challenges.
 
