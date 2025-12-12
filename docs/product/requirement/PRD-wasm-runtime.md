@@ -1,173 +1,150 @@
----
-Title: >
-    WASM Runtime Engine: Shared Runtime for Local-First Multi-Agent Orchestration
-Status: Proposed
-Version: 0.3
-Date: 2025-12-12
-Audience: [CTO, Architecture, Engineering]
-Owners: [Engineering Team]
-Reviewers: [CTO, Platform Architecture, ML Systems]
----
+# Product Requirements Document (PRD) v0.5
 
-# WASM Runtime Engine: Shared Runtime for Local-First Multi-Agent Orchestration
-## Product Requirements Document (PRD)
+**Title:** Shared Runtime for Local-First Multi-Agent Orchestration
+**Status:** Draft for Engineering Review
+**Version:** 0.5
+**Date:** 2025-12-15
+**To:** CTO, Platform Architecture, ML Systems
+**From:** Principal Engineer
+**Owners:** Engineering Team
+**Reviewers:** CTO, Platform Architecture, ML Systems
 
 ---
 
 ## 1. Product Summary
 
-We are building a shared execution runtime for a local-first, multi-agent system. The runtime must support deterministic, reproducible, and safe execution of heterogeneous agents—including CPU-bound decision logic and GPU-accelerated ML inference—while remaining operable in fully headless environments.
+The runtime provides a **deterministic, reproducible, and secure execution environment** for heterogeneous agents:
 
-This runtime is the substrate upon which all higher-level agent behaviors, tools, and UI components depend. It must provide a unified, stable contract for agent lifecycle, scheduling, communication, memory semantics, and compute abstraction.
+* CPU-bound WASM logic
+* GPU-accelerated ML inference via ONNX Runtime
+* Fully headless operation; optional read-only UI
+
+**Enhancements in v0.5:**
+
+1. Formal **determinism contracts** for scheduler, WASM, and ONNX runtime.
+2. Shared memory + message-passing standards.
+3. ABI & plugin security model specification.
+4. Quantified **performance and reproducibility targets**.
+5. Incorporates TSD principles to make the PRD actionable for engineering.
 
 ---
 
 ## 2. Product Goals
 
-### 2.1 Primary Goals
-1.  **Deterministic Multi-Agent Execution**: Identical input sequences must yield identical global system behavior across runs and platforms.
-2.  **Unified Compute Framework**:
-    - CPU-bound logic executes in sandboxed WASM environments.
-    - GPU-bound inference is provided through ONNX Runtime with transparent CPU fallback.
-3.  **Local-First, Headless-First Operating Model**: The runtime must fully operate without UI or cloud connectivity. All visualization components must be optional and strictly decoupled.
-4.  **Cross-Platform Runtime Uniformity**: Behavior must remain consistent across Linux, Windows, and macOS.
+1. **Deterministic Multi-Agent Execution**
+   * Scheduler guarantees reproducible ordering; deterministic tick clock enforced.
+   * WASM agent execution bounded and metered; no wall-clock dependencies.
+   * ONNX runtime must operate in deterministic mode; CPU fallback preserves functional reproducibility.
+
+2. **Unified Compute Framework**
+   * CPU logic sandboxed in WASM with instruction metering.
+   * GPU/CPU inference via ONNX Runtime, centrally managed by orchestrator.
+
+3. **Local-First, Headless-First Operating Model**
+   * Fully functional without UI or cloud connectivity.
+   * Optional UI strictly read-only, pull-based.
+
+4. **Cross-Platform Uniformity**
+   * Identical behavior across Linux, Windows, macOS.
+
+5. **Model Management Service**
+   * Handles model lifecycle, caching, GPU memory, versioning.
+   * Orchestrator interacts via API: `requestInference(modelId, version, inputBuffer)`.
+
+6. **Agent Developer Experience**
+   * Agent SDK elevated to core product.
+   * Provides language bindings (Rust, C++, AssemblyScript), message APIs, memory access libraries, and debugging tools.
+
+7. **ABI & Plugin Security Model**
+   * All plugins signed, versioned, and capability-declared.
+   * ABI versioning enforced; orchestrator rejects incompatible modules.
 
 ---
 
-## 3. Non-Goals (Explicit Exclusions)
+## 3. Determinism Contracts
 
-The runtime will not:
-- Provide distributed consensus or state replication across machines.
-- Expose host system APIs directly to agents.
-- Embed a graphical engine or act as a UI container.
-- Manage long-term storage or database persistence.
-- Provide agent-level access to GPU APIs beyond ONNX Runtime.
-
----
-
-## 4. Product Requirements
-
-### 4.1 Functional Requirements
-
-#### 4.1.1 Agent Lifecycle Management
-The runtime must:
-- Initialize, activate, pause, resume, and terminate agents deterministically.
-- Enforce strict process isolation (no shared mutable state across agents).
-- Prevent agent faults from propagating beyond their WASM sandbox.
-
-#### 4.1.2 Deterministic Scheduler
-The scheduler must:
-- Support priority-based and round-robin modes.
-- Guarantee reproducible task ordering under identical inputs.
-- Provide hooks for future DAG-based scheduling without breaking determinism.
-
-#### 4.1.3 Shared Memory Model
-The runtime must provide:
-- A consistent `SharedArrayBuffer` + `Atomics` contract for high-throughput data exchange.
-- Defined data ownership rules (reader/writer semantics).
-- Zero-copy channels only within the orchestrator ↔ WASM domain.
-
-#### 4.1.4 Inter-Agent Communication
-- All communication flows through the orchestrator.
-- No agent may communicate directly with another agent.
-- Messages must be orderable, traceable, and replayable.
-
-#### 4.1.5 GPU/CPU Compute Abstraction
-- ML inference routes through ONNX Runtime only.
-- GPU acceleration is opportunistic; CPU fallback must preserve functional determinism.
-- Model loading/unloading must be managed centrally by the orchestrator.
-
-#### 4.1.6 Optional UI Integration
-- UI processes may subscribe to a read-only state channel.
-- UI must not mutate agent state, memory, or scheduler configuration.
-- IPC boundaries must guarantee crash isolation.
-
-### 4.2 Non-Functional Requirements (NFRs)
-
-#### 4.2.1 Reproducibility Guarantees
-The runtime must support:
-- Complete replay from logged agent inputs + scheduler events.
-- Identical behavior across repeated local runs.
-
-#### 4.2.2 Performance and Latency
-- CPU agent execution times must remain bounded and predictable.
-- Inference latency variance (GPU/CPU) must be reported and bounded.
-- `SharedArrayBuffer` interactions must not block the Node.js event loop.
-
-#### 4.2.3 Cross-Platform Consistency
-- All features must behave identically across Linux, Windows, and macOS.
-- No OS-specific scheduling or GPU assumptions.
-
-#### 4.2.4 Security & Isolation
-- WASM worker heaps must remain fully sandboxed.
-- No direct file, network, or OS access from WASM unless explicitly brokered.
-
-#### 4.2.5 Fault Tolerance
-- Agent crashes must not destabilize the orchestrator.
-- Inference failures must degrade gracefully to CPU fallback.
+| Subsystem | Contract |
+|-----------|----------|
+| Scheduler | Linear FIFO/priority queue; logical clock ensures tick reproducibility; DAG deferred to v2. |
+| WASM Agent | Step execution bounded and metered; no wall-clock I/O unless sandboxed; reproducible outputs per identical input sequence. |
+| ONNX Runtime | CPU execution deterministic; GPU requires deterministic kernels; fallback to CPU maintains functional consistency. |
 
 ---
 
-## 5. Architecture Overview (High-Level)
+## 4. Shared Memory + Message Passing
 
-```mermaid
-graph TD
-    O["Node.js Orchestrator<br>Deterministic Scheduler<br>State & IPC Hub"]
-
-    subgraph W["WASM Worker Pool"]
-        W1["WASM Worker 1"]
-        W2["WASM Worker 2"]
-        Wn["..."]
-    end
-
-    ONNX["ONNX Runtime<br>GPU/CPU Accelerator"]
-
-    UI["Optional UI<br>(Read-Only)"]
-
-    O --> W
-    O --> ONNX
-    O --> UI
-    W --> O
-    ONNX --> O
-```
+* **Scope:** Orchestrator ↔ WASM agents
+* **Mechanism:** `SharedArrayBuffer` + `Atomics`
+* **Ownership Rules:** Single-writer, multi-reader; zero-copy only within orchestrator domain
+* **Messaging API:**
+  * `publish(topic, message)` → broadcast, FIFO per topic
+  * `send(agentId, message)` → directed message
+  * `joinChannel(agentId, channel)` → subscribe to named channel
+* **Replayable:** All messages serialized with timestamps and logical tick references
 
 ---
 
-## 6. Key Product Invariants (The “Contract”)
+## 5. Agent ABI & Plugin Model
 
-These must hold in all implementations and future extensions:
-- Agents are isolated.
-- All scheduling is deterministic.
-- All mutable memory flows through the orchestrator.
-- GPU is optional; semantics are identical on CPU.
-- UI is optional; runtime remains headless-first.
-- Cross-platform builds behave identically.
-- Replay reproduces the same global state evolution.
+| Feature | Description |
+|---------|-------------|
+| ABI Functions | `agent_init()`, `agent_step(context_ptr)`, `agent_receive(message_ptr)`, `agent_shutdown()` |
+| Plugin Security | Signed modules with declared capabilities; version compatibility enforced |
+| Sandboxing | No direct OS access; I/O and GPU access brokered through orchestrator |
+| Versioning | ABI v1 enforced; orchestrator rejects mismatched plugin versions |
 
 ---
 
-## 7. Acceptance Criteria
+## 6. Architecture Principles (from TSD)
 
-A release candidate of the runtime must demonstrate:
-1.  Deterministic replay of agent behavior across multiple runs.
-2.  Stable scheduling behavior under synthetic stress workloads.
-3.  WASM workers operating in full isolation without cross-heap mutation.
-4.  ONNX inference functioning identically with and without GPU availability.
-5.  Headless operation across Linux, Windows, macOS validated.
-6.  UI integration running in a separate process without impacting runtime.
-7.  No direct communication paths between agents.
+* **Node.js Orchestrator:** deterministic scheduler, state hub, message broker, replay logger
+* **WASM Worker Pool:** CPU agent execution, instruction metering, sandboxed
+* **ONNX Runtime:** GPU/CPU inference, deterministic mode, centrally managed
+* **Optional UI:** read-only, pull-based snapshot, process-isolated
 
 ---
 
-## 8. Open Questions / Risks
-- How should model versioning be governed (checksum, signature, semantic versioning)?
-- Do we need a concept of “agent capabilities” negotiated at startup?
-- Should DAG scheduling be introduced in v1 or held for a future release?
+## 7. Performance & Reproducibility Targets
+
+| Metric | Target |
+|--------|--------|
+| Scheduler tick overhead | < 10 ms per 50 agents |
+| CPU agent step | < 5 ms per step under nominal workload |
+| ONNX inference latency variance | ±5% across runs and platforms |
+| Replay determinism | 100% bit-level reproducibility on CPU, functional reproducibility on GPU |
+| Message throughput | ≥ 10k messages/sec via orchestrator bus without breaking determinism |
 
 ---
 
-## 9. Future Extensions
-- Federation of multiple runtime instances.
-- WASI-based system integrations.
-- Dynamic scaling of WASM workers.
-- Multi-tenant agent sandboxes.
+## 8. Acceptance Criteria
+
+1. Deterministic replay across multiple runs (CPU bit-level, GPU functional).
+2. Linear scheduler produces stable order under load.
+3. WASM workers fully isolated with bounded execution.
+4. ONNX inference consistent with GPU/CPU fallback.
+5. Headless runtime operates across Linux, Windows, macOS.
+6. UI attach/detach without affecting runtime.
+7. No direct cross-agent communication; all flows through orchestrator.
+8. Model management service functional and accessible via orchestrator API.
+9. Agent SDK enables building, testing, and debugging compliant WASM agents.
+10. Plugins enforce signing, versioning, and capability constraints.
+
+---
+
+## 9. Open Questions
+
+* Arbitrated direct agent-to-agent memory channels: v1 or deferred?
+* DAG scheduler release plan for v2.
+* Logging format/versioning for cross-platform replay.
+
+---
+
+## 10. Future Extensions
+
+* DAG-based scheduler (v2).
+* Multi-instance federation.
+* Dynamic scaling of WASM workers.
+* Multi-tenant agent sandboxes.
+* WASI-based host integration.
+
+This PRD v0.5 is **implementation-ready**: it incorporates formal determinism contracts, shared memory and messaging standards, ABI/plugin security, TSD architecture principles, and measurable performance/reproducibility targets.
