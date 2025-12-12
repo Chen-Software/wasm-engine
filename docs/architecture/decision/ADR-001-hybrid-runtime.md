@@ -1,14 +1,15 @@
 ---
 Status: Proposed
-Date: 2025-12-12
-Version: 0.3
 Owners: [Engineering Team]
 Reviewers: [Engineering Team]
+Date: 2025-12-12
+Version: 0.3
 Tags: [Architecture, Runtime, Node.js, Bun, WASM, ONNX, Electron, WebGPU]
-
+ID: 3b95ebbd87fc61525c970ac6180ccd397b449d31
 ---
 
-# ADR: Node.js + WASM + ONNX Runtime as the Shared Runtime (Updated)
+# ADR: Node.js + WASM + ONNX Runtime as the Shared Runtime
+## Architecture Decision Record
 
 ## 1. Context / Problem Statement
 
