@@ -28,7 +28,7 @@ The system is designed with a clear separation of concerns:
 
 These layers communicate efficiently through a combination of IPC for control messages and a **Shared Memory Buffer** for large data, which eliminates the need for costly data copying.
 
-For a complete technical breakdown of the system's design, including an in-depth analysis of performance challenges and optimized solutions for memory management, threading, and data flow, please see the full **[Architecture Design Document & Technical Review](docs/ARCHITECTURE.md)**.
+For a high-level overview of the technical architecture, core components, and data flows, please see the **[Master Architecture Design](docs/ARCHITECTURE.md)**.
 
 ## Getting Started
 
