@@ -13,7 +13,7 @@ This project serves as a foundational guide for building applications that requi
 
 ### Core Architecture
 
-The architecture is detailed in the [Architecture Design Document (ADD)](/docs/ADD-electron-servo-wasm.md). It is based on three primary components:
+The architecture is detailed in the [Architecture Design Document (ADD)](/docs/architecture/design/ADD-wasm-engine.md). It is based on three primary components:
 
 1.  **Electron Layer:** Manages the user interface, OS-level integrations, and the orchestration of background tasks.
 2.  **Servo Layer:** A dedicated, multi-threaded rendering engine for all visual output, ensuring smooth, high-framerate graphics.
