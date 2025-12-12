@@ -1,4 +1,4 @@
-# Project Title (To Be Determined)
+# wasm-engine
 
 Welcome to this high-performance desktop application project, a forward-looking concept designed to push the boundaries of computation and rendering.
 
