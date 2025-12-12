@@ -8,9 +8,10 @@ This project is currently in the **conceptual phase**. The architecture serves a
 
 The engine's architecture is built upon a powerful combination of modern technologies:
 
-- **Electron**: Serves as the host environment, providing the main event loop, OS-level integration, and the orchestration layer for the engine's core components.
-- **Servo**: A multi-threaded, Rust-based rendering engine used for all high-performance, GPU-accelerated rendering tasks.
-- **WebAssembly (WASM)**: For running CPU-intensive computations (like simulations, physics, or data processing) at near-native speed in a sandboxed environment.
+- **Electron / Node.js**: Serves as the host environment, providing the main event loop, OS-level integration, and the central orchestrator for all agent tasks.
+- **WebAssembly (WASM)**: For running sandboxed, CPU-bound agent logic at near-native speed in isolated worker threads.
+- **ONNX Runtime**: A production-grade inference engine for executing LLM models on the GPU (with CPU fallback), ensuring high-performance, cross-platform reliability.
+- **Servo (Optional)**: Can be embedded for advanced, GPU-accelerated UI visualizations, but is fully decoupled from the core compute and inference pipeline.
 
 ## Project Goals
 
@@ -21,12 +22,12 @@ The primary goals of this architectural design are:
 
 ## Architecture Overview
 
-The system is designed with a clear separation of concerns:
-1.  **Electron Layer**: Handles the user interface and orchestrates tasks.
-2.  **WASM Layer**: Executes CPU-heavy computations in a pool of worker threads.
-3.  **Servo Layer**: Manages all rendering, leveraging the GPU for acceleration.
+The system is designed around a central **Orchestrator** running in the main Node.js/Electron process. This orchestrator manages and schedules tasks across two primary compute layers:
 
-These layers communicate efficiently through a combination of IPC for control messages and a **Shared Memory Buffer** for large data, which eliminates the need for costly data copying.
+1.  **WASM Worker Pool**: Executes sandboxed, CPU-bound agent logic.
+2.  **ONNX Runtime**: Handles GPU-accelerated (with CPU fallback) LLM inference.
+
+These components communicate efficiently using a combination of message passing and shared memory buffers to minimize data copying and ensure low-latency, deterministic execution. An optional UI layer can be used for monitoring without interfering with the core compute pipeline.
 
 For a high-level overview of the technical architecture, core components, and data flows, please see the **[Master Architecture Design](docs/ARCHITECTURE.md)**.
 

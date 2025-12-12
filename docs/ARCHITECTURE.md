@@ -8,45 +8,43 @@
 
 ## Related Documents
 
-- **[ADR-001: Hybrid Runtime Architecture](./ADR-001-hybrid-runtime-architecture.md)**: Justification for the chosen hybrid of Electron, Servo, and WASM.
+- **[ADR-001: Hybrid Runtime Architecture](./ADR-001-hybrid-runtime-architecture.md)**: Justification for the chosen hybrid of Electron, ONNX Runtime, and WASM.
 
 ---
 
 ## 1. Overview
 
-This document describes the high-level technical architecture of a local-first hybrid runtime for multi-agent orchestration and LLM inference, supporting both headless and non-headless desktop modes.
+This document describes the high-level technical architecture of a local-first hybrid runtime for multi-agent orchestration and LLM inference. The architecture is designed for deterministic, high-performance execution in both headless and non-headless (UI-enabled) modes.
 
 **Objectives**:
-1.  Enable CPU-bound tasks (agent logic, LLM inference preprocessing) with safe sandboxing.
-2.  Enable GPU-bound tasks (matrix operations, tensor computations, LLM acceleration) using Servo WebGPU.
-3.  Provide deterministic orchestration across multiple agents.
-4.  Support optional UI monitoring without interfering with computation.
-5.  Facilitate headless operation and local-first execution with no cloud dependencies.
+1.  Enable CPU-bound tasks (e.g., agent logic) with safe sandboxing via **WebAssembly (WASM)**.
+2.  Enable GPU-accelerated LLM inference via **ONNX Runtime**, with automatic CPU fallback.
+3.  Provide deterministic, reproducible orchestration of multi-agent tasks.
+4.  Support an optional, decoupled UI for monitoring and visualization.
+5.  Ensure robust, cross-platform, local-first execution with no cloud dependencies.
 
 ---
 
 ## 2. Architectural Principles
 
--   **Hybrid Execution**: CPU tasks via WASM, GPU tasks via Servo WebGPU.
--   **Local-First**: All execution occurs locally; deterministic scheduling ensures reproducibility.
--   **Sandboxing & Isolation**: WASM workers and Servo GPU threads isolate agents and GPU workloads.
--   **Shared Memory**: Zero-copy shared buffers for efficient CPU-GPU communication.
--   **Asynchronous Execution**: Main orchestrator schedules tasks asynchronously to maximize CPU/GPU utilization.
--   **Optional UI Layer**: Decoupled from compute threads to avoid blocking or latency issues.
+-   **Hybrid Compute**: CPU-bound tasks are executed by WASM workers, while GPU-bound inference is handled by ONNX Runtime.
+-   **Deterministic Orchestration**: A central Node.js/Electron orchestrator manages a deterministic task queue for all agent actions and inference requests.
+-   **Production-Grade GPU Inference**: Leverages the stability and cross-platform support of ONNX Runtime for GPU acceleration, avoiding experimental technologies for core compute.
+-   **Decoupled UI**: The optional UI layer (Electron or Servo-enhanced) is fully decoupled from the compute plane, ensuring that monitoring does not interfere with agent execution.
+-   **Safety and Isolation**: WASM provides sandboxing for agent logic, while the ONNX Runtime is a proven, secure inference engine.
 
 ---
 
 ## 3. Core Components
 
-| Component                          | Role / Responsibility                                                                                                                     |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| **Electron Runtime**               | Desktop runtime, Node.js orchestration, optional UI for monitoring; coordinates task scheduling and communication.                        |
-| **Main Orchestrator (Electron Main Process)** | Determines task type (CPU/GPU), schedules agents, maintains task queues, manages shared memory allocation.                            |
-| **WASM Worker Pool**               | Runs CPU-bound agents or LLM preprocessing; isolated threads, communicates via shared memory buffers.                                    |
-| **Servo Runtime (Embedded)**       | Executes GPU-bound tasks asynchronously via WebGPU; dedicated WGPU thread and poller; receives tasks and buffers from orchestrator or WASM. |
-| **Shared Memory / Buffers**        | Low-latency, zero-copy data exchange between WASM workers, Servo GPU, and orchestrator.                                                  |
-| **Optional UI / Monitoring Layer** | Visualizes agent status, GPU/CPU workloads, and logs; decoupled from compute threads.                                                    |
-| **Persistence / Storage (optional)** | Local storage for state, agent checkpoints, or long-term memory if required.                                                              |
+| Component                          | Role / Responsibility                                                                                                 |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| **Node.js / Electron Runtime**     | The primary host process. Provides the event loop, Node.js APIs, and orchestrates all other components.                 |
+| **Main Orchestrator (in Node.js)** | Manages a deterministic task scheduler, coordinates IPC between components, and handles state management.               |
+| **WASM Worker Pool**               | Executes CPU-bound agent logic in sandboxed, isolated worker threads. Communicates via message passing or shared memory. |
+| **ONNX Runtime**                   | Executes LLM inference on GPU (e.g., CUDA, TensorRT) with automatic and reliable fallback to CPU.                       |
+| **Optional UI / Monitoring Layer** | An Electron-based UI for visualizing agent state and system metrics. May embed **Servo** for advanced, GPU-accelerated visualizations. |
+| **Shared Memory / Buffers**        | Used for efficient, low-latency data exchange between the orchestrator, WASM workers, and the ONNX Runtime.            |
 
 ---
 
@@ -54,93 +52,59 @@ This document describes the high-level technical architecture of a local-first h
 
 ```mermaid
 flowchart TB
-    subgraph "Desktop Runtime"
-        Orchestrator[Main Orchestrator (Electron)]
-        WorkerPool[WASM Workers (CPU Tasks)]
-        ServoRuntime[Servo WebGPU (GPU Tasks)]
+    subgraph "Local-First Runtime"
+        Orchestrator[Main Orchestrator (Node.js/Electron)]
+        WorkerPool[WASM Workers (CPU Agent Logic)]
+        ONNX[ONNX Runtime (GPU/CPU Inference)]
         SharedMem[Shared Memory Buffers]
-        UI[Optional UI / Monitoring]
+        UI[Optional UI Layer]
     end
 
-    Orchestrator --> WorkerPool
-    WorkerPool --> SharedMem
-    Orchestrator --> ServoRuntime
-    ServoRuntime --> SharedMem
-    WorkerPool --> ServoRuntime
-    UI --> Orchestrator
+    Orchestrator -- "Schedules CPU Task" --> WorkerPool
+    WorkerPool -- "Writes Results" --> SharedMem
+    Orchestrator -- "Schedules GPU Task" --> ONNX
+    ONNX -- "Writes Results" --> SharedMem
+
+    WorkerPool -- "Requests Inference" --> Orchestrator
+
+    UI -- "Reads State for Visualization" --> Orchestrator
+
 ```
 
 **Explanation**:
-1.  **Task Scheduling**: Orchestrator receives a task (e.g., agent logic or LLM inference).
-2.  **CPU Tasks**: Sent to WASM workers; intermediate results stored in shared memory.
-3.  **GPU Tasks**: GPU-bound tasks (matrix ops, tensor multiplications) sent to Servo WebGPU runtime.
-4.  **Shared Memory**: Enables zero-copy data transfer between CPU and GPU tasks.
-5.  **Result Aggregation**: Orchestrator collects results from WASM workers and Servo, optionally feeding into UI for visualization.
+1.  **Task Scheduling**: The **Orchestrator** receives tasks (e.g., execute agent logic, perform LLM inference).
+2.  **CPU Tasks**: Agent logic is dispatched to the **WASM Worker Pool**. Workers execute the logic and write results to **Shared Memory**. If an agent needs to perform inference, it sends a request back to the orchestrator.
+3.  **GPU Tasks**: The orchestrator sends inference requests to the **ONNX Runtime**, which executes the model on the appropriate device (GPU or CPU) and writes the output to **Shared Memory**.
+4.  **Result Aggregation**: The orchestrator reads results from shared memory to coordinate the next steps in the agent lifecycle.
+5.  **UI Visualization**: The optional **UI Layer** reads state from the orchestrator via IPC to provide monitoring without impacting the compute loop.
 
 ---
 
 ## 5. Component Interactions
 
-1.  **Electron ↔ WASM Workers**:
-    -   Orchestrator assigns CPU-bound tasks.
-    -   Worker threads execute tasks asynchronously.
-    -   Results stored in shared memory; orchestrator polls or subscribes for completion.
-2.  **Electron ↔ Servo WebGPU**:
-    -   Orchestrator submits GPU tasks and buffers.
-    -   Servo handles async execution in WGPU thread; poller ensures GPU queue progresses.
-    -   Results returned via shared memory for WASM or orchestrator consumption.
-3.  **WASM ↔ Servo WebGPU**:
-    -   Shared memory buffers used for input/output tensors.
-    -   Asynchronous coordination; CPU preprocessing and GPU computation can run in parallel.
-4.  **Optional UI ↔ Orchestrator**:
-    -   Reads task queues, agent states, GPU workload metrics.
-    -   Updates dashboards or logging without blocking compute threads.
+-   **Orchestrator ↔ WASM Workers**:
+    -   The orchestrator uses a deterministic scheduler (e.g., round-robin) to assign tasks to WASM workers.
+    -   Communication occurs via message channels (`postMessage`) or a carefully managed `SharedArrayBuffer` with `Atomics` for synchronization.
+-   **Orchestrator ↔ ONNX Runtime**:
+    -   The orchestrator serializes inference requests to ensure deterministic execution order.
+    -   It passes input tensors (often located in shared memory) to ONNX and receives output tensors.
+-   **Optional UI ↔ Orchestrator**:
+    -   The UI is a read-only consumer of state. It requests data from the orchestrator via IPC and renders it. It does not have direct access to the compute components.
 
 ---
 
-## 6. Threading and Concurrency Model
+## 6. Headless vs. Non-Headless Operation
 
--   **Electron Main Process**: Orchestrates scheduling, shared memory allocation, and inter-component communication.
--   **WASM Worker Threads**: Isolated, CPU-bound execution, handles multiple agents concurrently.
--   **Servo WGPU Thread + Poller Thread**: Async GPU task execution, decoupled from orchestrator; handles multiple compute pipelines in parallel.
--   **Optional UI Thread**: Independent rendering thread; reads shared memory and orchestrator state.
-
----
-
-## 7. Headless vs Non-Headless Operation
-
-| Mode                       | Role of Components                                                                                       |
-| -------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **Non-Headless (with UI)** | Electron orchestrator + WASM CPU tasks + Servo WebGPU; UI monitors status and metrics.                   |
-| **Headless (no UI)**       | Electron orchestrator may be optional; WASM CPU tasks + Servo WebGPU continue to execute; no rendering required. |
-
-**Key Point**: Servo WebGPU remains useful in both modes, providing GPU acceleration regardless of UI presence.
+| Mode                       | Role of Components                                                                  |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| **Non-Headless (with UI)** | The full stack is active: Electron hosts the orchestrator, compute runtimes, and the UI. |
+| **Headless (no UI)**       | The Electron/Node.js process runs without a window. The UI layer is never initialized, saving resources. The core orchestrator, WASM pool, and ONNX Runtime function identically. |
 
 ---
 
-## 8. Scalability and Extensibility
+## 7. Summary
 
--   **Multi-agent scaling**: Add additional WASM worker threads for more agents; orchestrator queues tasks efficiently.
--   **GPU scaling**: Servo can handle multiple concurrent GPU tasks via async WGPU thread + poller.
--   **Extensible compute paths**: WASM and Servo layers allow swapping LLM models or adding new agents without rewriting orchestration logic.
--   **Optional modules**: Storage, logging, checkpointing, or human-in-the-loop control can be added without disrupting core architecture.
-
----
-
-## 9. Design Considerations / Constraints
-
--   **Servo WebGPU is experimental**: GPU feature gaps may exist; careful testing required.
--   **Shared memory management**: Must avoid race conditions; proper memory synchronization and isolation required.
--   **WASM worker scheduling**: Task prioritization needed to avoid CPU bottlenecks.
--   **Electron UI**: Must be decoupled to prevent blocking CPU/GPU threads.
--   **Headless operation**: Orchestrator logic must work independently from UI threads.
-
----
-
-## 10. Summary
-
-This Master Architecture provides:
--   A hybrid CPU/GPU runtime for local-first LLM inference and multi-agent orchestration.
--   Support for both headless and UI-integrated operation.
--   High-performance execution via WASM workers and Servo WebGPU, coordinated by an Electron orchestrator.
--   Safe isolation, asynchronous execution, and extensibility for future modules.
+This Master Architecture provides a robust, stable, and high-performance hybrid runtime for local-first multi-agent systems:
+-   It leverages production-ready technologies for its core compute functions (**WASM** and **ONNX Runtime**).
+-   It ensures deterministic and reproducible agent behavior through a centralized orchestrator.
+-   It supports both headless and UI-integrated modes, with a clear separation between computation and visualization.
