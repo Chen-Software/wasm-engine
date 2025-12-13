@@ -1,66 +1,67 @@
-import { simpleGit, SimpleGit } from 'simple-git';
+import { getGit } from '../../src/projection-env';
 import { project } from '../../src/projector';
 import { reconstruct } from '../../src/reconstructor';
 import { TestRepoBuilder } from '../harness/test-repo-builder';
+import { SimpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { calculateSnapshotHash } from '../../src/snapshot';
 
-describe('Basic Reconstruction', () => {
+describe('Step 6: Basic Reconstruction', () => {
   let repoBuilder: TestRepoBuilder;
   let git: SimpleGit;
 
   beforeEach(async () => {
     repoBuilder = await TestRepoBuilder.create();
-    git = simpleGit(repoBuilder.repoPath);
+    git = getGit(repoBuilder.repoPath);
   });
 
   afterEach(async () => {
     await repoBuilder.cleanup();
   });
 
-  it('should reconstruct a simple project', async () => {
-    const sourceCommit = await repoBuilder.commitFiles(
-      { 'a.txt': '1', 'nested/b.txt': '2' },
-      'Commit 1',
-    );
-    const dataCommit = await project(sourceCommit, repoBuilder.repoPath);
+  it('P1: reconstructs a simple project with nested files', async () => {
+    const files = {
+      'file.txt': 'hello',
+      'a/b/c.txt': 'nested',
+    };
+    const sourceCommit = await repoBuilder.commit('Commit 1', files);
+    const dataCommitSha = await project(git, sourceCommit);
 
-    const outputDir = '/tmp/reconstructed-project';
-    await reconstruct(git, dataCommit, outputDir);
+    const outputDir = '/tmp/reconstructed-test';
+    await reconstruct(git, dataCommitSha, outputDir);
 
-    const fileA = await fs.readFile(path.join(outputDir, 'a.txt'), 'utf8');
-    const fileB = await fs.readFile(path.join(outputDir, 'nested/b.txt'), 'utf8');
+    // Verify file content
+    const content1 = await fs.readFile(path.join(outputDir, 'file.txt'), 'utf-8');
+    const content2 = await fs.readFile(path.join(outputDir, 'a/b/c.txt'), 'utf-8');
+    expect(content1).toBe('hello');
+    expect(content2).toBe('nested');
 
-    expect(fileA).toBe('1');
-    expect(fileB).toBe('2');
-
-    // Verify the tree hash
-    const tempGit = simpleGit(outputDir);
+    // Verify tree hash for perfect reconstruction
+    const tempGit = getGit(outputDir);
     await tempGit.init();
     await tempGit.add('.');
-    const reconstructedTreeSha = await tempGit.raw('write-tree');
+    const reconstructedTreeSha = (await tempGit.raw(['write-tree'])).trim();
 
     const sourceTreeSha = await git.revparse([`${sourceCommit}^{tree}`]);
-    expect(reconstructedTreeSha.trim()).toBe(sourceTreeSha);
+    expect(reconstructedTreeSha).toBe(sourceTreeSha);
 
     await fs.rm(outputDir, { recursive: true, force: true });
   });
 
-  it('should preserve executable file modes', async () => {
-    await repoBuilder.commitFiles({ 'script.sh': '#!/bin/bash\necho "hello"' }, 'Commit 1');
+  it('P1: preserves executable file modes during reconstruction', async () => {
+    await repoBuilder.commit('base', { 'script.sh': '#!/bin/sh' });
     await fs.chmod(path.join(repoBuilder.repoPath, 'script.sh'), '755');
-    await git.add('script.sh');
-    const sourceCommit = await git.commit('Executable file').then(r => r.commit);
+    await repoBuilder.git.add('script.sh');
+    const sourceCommit = await repoBuilder.git.commit('Make executable');
 
-    const dataCommit = await project(sourceCommit, repoBuilder.repoPath);
+    const dataCommitSha = await project(git, sourceCommit.commit);
 
-    const outputDir = '/tmp/reconstructed-exec';
-    await reconstruct(git, dataCommit, outputDir);
+    const outputDir = '/tmp/reconstructed-exec-test';
+    await reconstruct(git, dataCommitSha, outputDir);
 
     const stats = await fs.stat(path.join(outputDir, 'script.sh'));
-    // Check if the execute bit is set for the user.
-    expect(stats.mode & 0o100).toBe(0o100);
+    // Check if the execute bit is set (user, group, or other)
+    expect(stats.mode & 0o111).toBe(0o111);
 
     await fs.rm(outputDir, { recursive: true, force: true });
   });

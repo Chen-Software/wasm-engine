@@ -1,83 +1,113 @@
 import { SimpleGit } from 'simple-git';
-import { getDeterministicGit } from './projection-env';
-import { calculateSnapshotHash } from './snapshot';
+import { getGit } from './projection-env';
+import { computeSnapshotHash } from './snapshot';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-type CommitMetadata = {
+type ProjectionMetadata = {
   original_commit_sha: string;
   source_parent_shas: string[];
   parent_data_commit_oid: string | null;
   snapshot_hash: string;
-  files: { path: string; sha: string; mode: string }[];
+  files: Array<{
+    path: string;
+    blob_sha: string;
+    mode: string;
+    size: number;
+  }>;
 };
 
-export async function project(sourceCommitSha: string, repoPath: string): Promise<string> {
-  const git = getDeterministicGit(repoPath);
+// Helper to find the projection of a specific source commit by scanning history.
+// This is needed to correctly find the parent of a merge commit projection.
+async function findProjectionOf(git: SimpleGit, sourceCommitSha: string): Promise<string | null> {
+  try {
+    const log = await git.log({ 'workspace/data': null });
+    for (const commit of log.all) {
+      try {
+        const metadataJson = await git.show([`${commit.hash}:metadata/commit.json`]);
+        const metadata: ProjectionMetadata = JSON.parse(metadataJson);
+        if (metadata.original_commit_sha === sourceCommitSha) {
+          return commit.hash;
+        }
+      } catch (e) { /* Not a projection commit */ }
+    }
+  } catch (e) { /* Data branch doesn't exist */ }
+  return null;
+}
+
+export async function project(git: SimpleGit, sourceCommitSha: string): Promise<string> {
+  const repoPath = await git.revparse(['--show-toplevel']);
+  const deterministicGit = getGit(repoPath);
+  const dataBranch = 'workspace/data';
+
+  // --- Idempotency & Parent Logic ---
+  const sourceParents = (await deterministicGit.show(['-s', '--format=%P', sourceCommitSha])).trim().split(' ').filter(Boolean);
+  const isMerge = sourceParents.length > 1;
 
   let parentDataCommitOid: string | null = null;
-  try {
-    parentDataCommitOid = await git.revparse(['refs/heads/workspace/data']);
-  } catch (e) { /* Branch doesn't exist */ }
 
-  if (parentDataCommitOid) {
+  if (isMerge) {
+    // For a merge, the parent MUST be the projection of the first source parent.
+    parentDataCommitOid = await findProjectionOf(deterministicGit, sourceParents[0]);
+  } else {
+    // For a linear commit, the parent is simply the current head of the data branch.
     try {
-      const metadataJson = await git.show([`${parentDataCommitOid}:metadata/commit.json`]);
-      const metadata: CommitMetadata = JSON.parse(metadataJson);
-      if (metadata.original_commit_sha === sourceCommitSha) {
-        return parentDataCommitOid;
-      }
-    } catch (e) { /* Not a projection commit */ }
+      parentDataCommitOid = await deterministicGit.revparse([dataBranch]);
+    } catch (e) { /* Branch doesn't exist */ }
   }
 
-  const snapshotHash = await calculateSnapshotHash(git, sourceCommitSha);
-  const treeListing = await git.raw('ls-tree', '-r', sourceCommitSha);
-  const files = treeListing.split('\n').filter(Boolean).map(line => {
-    const [mode, , sha, path] = line.split(/[ \t]/);
-    return { path, sha, mode };
+  // Idempotency check: If the would-be parent is already a projection of the current commit, we're done.
+  if (parentDataCommitOid) {
+      try {
+        const parentMetadataJson = await deterministicGit.show([`${parentDataCommitOid}:metadata/commit.json`]);
+        const parentMetadata: ProjectionMetadata = JSON.parse(parentMetadataJson);
+        if (parentMetadata.original_commit_sha === sourceCommitSha) {
+            return parentDataCommitOid;
+        }
+      } catch(e) { /* Not a projection commit */ }
+  }
+
+
+  // --- Projection Logic ---
+  const snapshotHash = await computeSnapshotHash(deterministicGit, sourceCommitSha);
+  const lsTreeOutput = await deterministicGit.raw(['ls-tree', '-r', '-l', sourceCommitSha]);
+  const files = lsTreeOutput.trim().split('\n').filter(Boolean).map(line => {
+      const parts = line.split(/[ \t]+/);
+      return { mode: parts[0], blob_sha: parts[2], path: parts[4], size: parseInt(parts[3], 10) };
   });
 
-  const sourceParents = (await git.show(['-s', '--format=%P', sourceCommitSha])).trim().split(' ');
-
   const tempIndex = path.join(repoPath, '.git', 'index.projection');
-  const tempDir = await fs.mkdtemp('/tmp/proj-');
+  const tempDir = await fs.mkdtemp(path.join('/tmp', 'proj-'));
   try {
-    // Ensure the index is clean before starting
-    await fs.rm(tempIndex, { force: true });
-    const gitWithIndex = git.env({ ...process.env, GIT_INDEX_FILE: tempIndex });
+    const gitWithIndex = deterministicGit.env({ ...process.env, GIT_INDEX_FILE: tempIndex });
+    await fs.rm(tempIndex, { force: true }); // Ensure index is clean
 
-    // 1. Add artifact files to the new index
     for (const file of files) {
-      await gitWithIndex.raw('update-index', '--add', '--cacheinfo', `${file.mode},${file.sha},artifacts/${file.path}`);
+      await gitWithIndex.raw(['update-index', '--add', '--cacheinfo', `${file.mode},${file.blob_sha},artifacts/${file.path}`]);
     }
 
-    // 2. Create and add metadata file to the new index
-    const metadata: CommitMetadata = {
+    const metadata: ProjectionMetadata = {
       original_commit_sha: sourceCommitSha,
-      source_parent_shas: sourceParents.filter(Boolean),
+      source_parent_shas: sourceParents,
       parent_data_commit_oid: parentDataCommitOid,
       snapshot_hash: snapshotHash,
       files,
     };
-    const metadataContent = JSON.stringify(metadata, null, 2);
-    const tempMetadataPath = path.join(tempDir, 'commit.json');
-    await fs.writeFile(tempMetadataPath, metadataContent);
-    const metadataSha = (await gitWithIndex.hashObject(tempMetadataPath, true)).trim();
+    const metadataPath = path.join(tempDir, 'commit.json');
+    await fs.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+    const metadataSha = (await gitWithIndex.hashObject(metadataPath, true)).trim();
+    await gitWithIndex.raw(['update-index', '--add', '--cacheinfo', `100644,${metadataSha},metadata/commit.json`]);
 
-    await gitWithIndex.raw('update-index', '--add', '--cacheinfo', `100644,${metadataSha},metadata/commit.json`);
+    const rootTreeSha = (await gitWithIndex.raw(['write-tree'])).trim();
 
-    // 3. Write the single, complete tree
-    const rootTreeSha = (await gitWithIndex.raw('write-tree')).trim();
-
-    // 4. Create the commit
-    const commitArgs = ['-m', `Projection of ${sourceCommitSha}`];
+    const commitMessage = `Projection of ${sourceCommitSha}`;
+    const commitArgs = ['-m', commitMessage];
     if (parentDataCommitOid) {
       commitArgs.push('-p', parentDataCommitOid);
     }
-    const dataCommitSha = (await git.raw('commit-tree', rootTreeSha, ...commitArgs)).trim();
+    const dataCommitSha = (await deterministicGit.raw(['commit-tree', rootTreeSha, ...commitArgs])).trim();
 
-    // 5. Update the ref
-    await git.raw('update-ref', 'refs/heads/workspace/data', dataCommitSha);
+    await deterministicGit.raw(['update-ref', `refs/heads/${dataBranch}`, dataCommitSha]);
 
     return dataCommitSha;
   } finally {

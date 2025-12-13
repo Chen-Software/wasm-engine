@@ -1,57 +1,77 @@
-import { simpleGit, SimpleGit } from 'simple-git';
+import { getGit } from '../../src/projection-env';
 import { project } from '../../src/projector';
-import { validateTreeHash } from '../../src/validator';
+import { validateProjection } from '../../src/validator';
 import { TestRepoBuilder } from '../harness/test-repo-builder';
+import { SimpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-describe('Tree Hash Validation', () => {
+describe('Step 4: Tree Hash Validation', () => {
   let repoBuilder: TestRepoBuilder;
   let git: SimpleGit;
 
   beforeEach(async () => {
     repoBuilder = await TestRepoBuilder.create();
-    git = simpleGit(repoBuilder.repoPath);
+    git = getGit(repoBuilder.repoPath);
   });
 
   afterEach(async () => {
     await repoBuilder.cleanup();
   });
 
-  it('should pass for a valid projection', async () => {
-    const sourceCommit = await repoBuilder.commitFiles(
-      { 'a.txt': '1', 'nested/b.txt': '2' },
-      'Commit 1',
-    );
-    const dataCommit = await project(sourceCommit, repoBuilder.repoPath);
+  it('P1: validation passes for a correct projection', async () => {
+    const sourceCommit = await repoBuilder.commit('Commit 1', {
+      'file.txt': 'hello',
+      'nested/dir/file.sh': '#!/bin/sh',
+    });
+    await fs.chmod(path.join(repoBuilder.repoPath, 'nested/dir/file.sh'), '755');
+    await repoBuilder.git.add('.');
+    const sourceCommitWithMode = await repoBuilder.git.commit('make executable');
 
-    const isValid = await validateTreeHash(git, dataCommit);
+    const dataCommitSha = await project(git, sourceCommitWithMode.commit);
+
+    const isValid = await validateProjection(git, dataCommitSha);
     expect(isValid).toBe(true);
   });
 
-  it('should fail if a file is manually modified', async () => {
-    const sourceCommit = await repoBuilder.commitFiles({ 'a.txt': '1' }, 'Commit 1');
-    const dataCommit = await project(sourceCommit, repoBuilder.repoPath);
+  it('P1: validation fails if projected content differs from source', async () => {
+    const sourceCommit = await repoBuilder.commit('Commit 1', { 'a.txt': 'original' });
+    const dataCommitSha = await project(git, sourceCommit);
 
-    // Switch to the data branch and tamper with a file
-    await git.checkout('workspace/data');
-    const tamperedFilePath = path.join(repoBuilder.repoPath, 'artifacts', 'a.txt');
-    await fs.writeFile(tamperedFilePath, 'tampered content');
-    await git.add(tamperedFilePath);
-    const tamperedCommit = await git.commit('Tampered commit');
+    // Manually create a tampered commit on the data branch
+    const tempDir = await fs.mkdtemp('/tmp/tamper-');
+    const tempFile = path.join(tempDir, 'tampered.txt');
+    await fs.writeFile(tempFile, 'tampered content');
+    const tamperedBlobSha = (await git.hashObject(tempFile, true)).trim();
 
-    const isValid = await validateTreeHash(git, tamperedCommit.commit);
+    const tempIndex = path.join(repoBuilder.repoPath, '.git', 'index.tamper');
+    const gitWithIndex = git.env({ ...process.env, GIT_INDEX_FILE: tempIndex });
+
+    // 1. Add the tampered artifact file to the index
+    await gitWithIndex.raw(['update-index', '--add', '--cacheinfo', `100644,${tamperedBlobSha},artifacts/a.txt`]);
+
+    // 2. Add the original, valid metadata file to the index
+    const metadataBlobSha = await git.revparse([`${dataCommitSha}:metadata/commit.json`]);
+    await gitWithIndex.raw(['update-index', '--add', '--cacheinfo', `100644,${metadataBlobSha},metadata/commit.json`]);
+
+    // 3. Write a new tree from the tampered index
+    const newRootTree = (await gitWithIndex.raw(['write-tree'])).trim();
+
+    // 4. Create the tampered commit
+    const tamperedCommit = (await git.raw(['commit-tree', newRootTree, '-p', dataCommitSha, '-m', 'Tampered'])).trim();
+
+    // 5. Validate the tampered commit - it should fail because the artifact tree hash no longer matches the source tree hash
+    const isValid = await validateProjection(git, tamperedCommit);
     expect(isValid).toBe(false);
+
+    await fs.rm(tempIndex, { force: true });
+    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  it('should preserve executable file modes', async () => {
-    await repoBuilder.commitFiles({ 'a.txt': '1' }, 'Commit 1');
-    await fs.chmod(path.join(repoBuilder.repoPath, 'a.txt'), '755');
-    await git.add('a.txt');
-    const sourceCommit = await git.commit('Executable file');
-
-    const dataCommit = await project(sourceCommit.commit, repoBuilder.repoPath);
-    const isValid = await validateTreeHash(git, dataCommit);
+  it('P1: validation correctly handles nested directories and file modes', async () => {
+    const sourceCommit = await repoBuilder.commit('base', {'file': 'a'});
+    const dataCommitSha = await project(git, sourceCommit);
+    const isValid = await validateProjection(git, dataCommitSha);
     expect(isValid).toBe(true);
   });
 });

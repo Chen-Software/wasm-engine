@@ -1,7 +1,7 @@
-import { SimpleGitOptions, simpleGit } from 'simple-git';
+import { simpleGit, SimpleGit, SimpleGitOptions } from 'simple-git';
 
-// The deterministic environment variables required for all Git operations.
-export const deterministicGitEnvironment = {
+// The exact, non-negotiable environment for deterministic Git operations.
+const PROJECTION_ENV = {
   GIT_AUTHOR_NAME: 'projection-bot',
   GIT_AUTHOR_EMAIL: 'projection@localhost',
   GIT_COMMITTER_NAME: 'projection-bot',
@@ -16,25 +16,23 @@ export const deterministicGitEnvironment = {
 };
 
 /**
- * Creates a simple-git instance with a strictly deterministic environment.
- * All Git operations performed with this instance will be repeatable and
- * isolated from the user's local Git configuration.
+ * Creates a simple-git instance configured for deterministic operations.
+ * It is pre-configured to use the isolated, deterministic environment.
  *
  * @param baseDir - The path to the Git repository.
- * @returns A simple-git instance configured for deterministic operations.
+ * @returns A simple-git instance.
  */
-export function getDeterministicGit(baseDir: string) {
+export function getGit(baseDir: string): SimpleGit {
   const options: Partial<SimpleGitOptions> = {
     baseDir,
     binary: 'git',
     maxConcurrentProcesses: 1,
-    config: [],
   };
 
   const git = simpleGit(options);
 
-  // Apply the deterministic environment variables to all git commands.
-  git.env(deterministicGitEnvironment);
+  // Apply the deterministic environment to all commands run with this instance.
+  git.env(PROJECTION_ENV);
 
   return git;
 }
