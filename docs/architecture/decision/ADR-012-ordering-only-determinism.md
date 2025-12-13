@@ -1,9 +1,18 @@
 ---
-Title: "ADR-012: Ordering-Only Determinism (Deterministic Event Sequencing)"
-Status: Proposed
-Owners: [Engineering Team]
-Reviewers: [Engineering Team]
-Related: [ADR-010, ADR-011]
+id: ADR-012
+title: "Ordering-Only Determinism (Deterministic Event Sequencing)"
+status: "Proposed"
+date: "2025-12-17"
+owners: ["Engineering Team"]
+reviewers: ["Engineering Team"]
+related:
+  - "ADR-010"
+  - "ADR-011"
+tags:
+  - "determinism"
+  - "ordering"
+  - "scheduler"
+  - "event-sequencing"
 ---
 
 # ADR-012: Ordering-Only Determinism (Deterministic Event Sequencing)

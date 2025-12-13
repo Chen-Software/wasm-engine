@@ -1,9 +1,16 @@
 ---
-Title: "ADR-011: Reproducible Multi-Agent Execution"
-Status: Proposed
-Owners: [Engineering Team]
-Reviewers: [Engineering Team]
-Related: [ADR-010]
+id: ADR-011
+title: "Reproducible Multi-Agent Execution"
+status: "Proposed"
+date: "2025-12-17"
+owners: ["Engineering Team"]
+reviewers: ["Engineering Team"]
+related:
+  - "ADR-010"
+tags:
+  - "determinism"
+  - "reproducibility"
+  - "multi-agent-systems"
 ---
 
 # ADR-011: Reproducible Multi-Agent Execution
