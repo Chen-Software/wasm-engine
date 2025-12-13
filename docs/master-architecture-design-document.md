@@ -8,7 +8,9 @@
 
 ## 1. Overview
 
-This document provides a high-level overview of the `wasm-engine` shared runtime. It is the master reference for the system's architecture. The detailed rationale and specifications for individual components are elaborated in a series of **Architecture Decision Records (ADRs)**, which are indexed and linked below.
+This document provides a high-level overview of the `wasm-engine` shared runtime. It serves as a master index for the **Architecture Decision Records (ADRs)** that define the system's design.
+
+The authoritative technical contract for implementation is the **[Authoritative Technical Specification Document (ATSD)](./atsd-multi-agent-runtime.md)**, which synthesizes these ADRs into a formal specification.
 
 The primary goal of this architecture is to create a **local-first, deterministic, multi-agent runtime**. For a full breakdown of the product vision and requirements, please see the **[Product Requirements Document (PRD)](./prd-local-first-multi-agent-runtime.md)**.
 

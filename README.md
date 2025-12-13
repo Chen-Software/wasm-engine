@@ -21,9 +21,10 @@ The runtime is built on a set of non-negotiable architectural guarantees, as det
 
 This repository is structured around a set of core documents that define the project's vision, architecture, and requirements.
 
--   **[Master Architecture Design Document](./docs/master-architecture-design-document.md):** The primary entry point for understanding the high-level system architecture. It provides an overview of the core components and contains the master index of all Architecture Decision Records (ADRs).
--   **[Architecture Decision Records (ADRs)](./docs/adr/):** A directory containing the detailed rationale for every significant architectural decision in the project.
--   **[Product Requirements Document (PRD)](./docs/prd-local-first-multi-agent-runtime.md):** Defines the "what" and "why" of the project, outlining goals, non-goals, and key invariants.
+-   **[Authoritative Technical Specification Document (ATSD)](./docs/atsd-multi-agent-runtime.md):** The formal engineering contract. It synthesizes all architectural decisions into a single, authoritative specification for implementation.
+-   **[Master Architecture Design Document](./docs/master-architecture-design-document.md):** A high-level overview of the system architecture and the master index for all ADRs.
+-   **[Architecture Decision Records (ADRs)](./docs/adr/):** The detailed rationale for each significant architectural decision.
+-   **[Product Requirements Document (PRD)](./docs/prd-local-first-multi-agent-runtime.md):** Defines the product vision, goals, and requirements.
 
 ### 4. High-Level Roadmap
 
