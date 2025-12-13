@@ -29,7 +29,7 @@ The system is designed around a central **Orchestrator** running in the main Nod
 
 These components communicate efficiently using a combination of message passing and shared memory buffers to minimize data copying and ensure low-latency, deterministic execution. An optional UI layer can be-used for monitoring without interfering with the core compute pipeline.
 
-For a complete and consolidated overview of the project's architecture, product requirements, and design decisions, please see the **[Master Architecture Design Document (ADD)](docs/ARCHITECTURE.md)**. For a detailed breakdown of the product vision, goals, and requirements, please see the **[Product Requirements Document (PRD)](docs/PRD-local-first-multi-agent-runtime.md)**.
+For a complete and consolidated overview of the project's architecture, product requirements, and design decisions, please see the **[Master Architecture Design Document (ADD)](docs/ARCHITECTURE.md)**. For a detailed breakdown of the product vision, goals, and requirements, please see the **[Product Requirements Document (PRD)](docs/PRD-local-first-multi-agent-runtime.md)**. For the authoritative engineering contract, see the **[Authoritative Technical Specification Document (ATSD)](docs/ATSD.md)**.
 
 ## Getting Started
 

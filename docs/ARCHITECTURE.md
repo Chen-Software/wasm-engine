@@ -1,177 +1,207 @@
-# Master Architecture Design Document (ADD)
+# Runtime Architecture for Multi-Agent Orchestration: WebAssembly (WASM) Stack
 
-**Title:** Local-First Deterministic Multi-Agent Runtime
-**Status:** Proposed
-**Version:** 0.1
-**Date:** 2025-12-17
-**Owners:** Engineering Team
-**Reviewers:** CTO, Platform Architecture, Runtime Architects, ML Systems
-**Tags:** Architecture, Runtime, Node.js, WASM, ONNX, Electron, WebGPU
-
----
-
-## 1. Overview
-
-This document consolidates the architecture of a **local-first, deterministic multi-agent runtime**. It provides a single reference for:
-
-*   Core runtime orchestration (Node.js + WASM + ONNX Runtime)
-*   Deterministic scheduling, memory safety, and agent execution contracts
-*   Optional decoupled UI layer
-*   Modular ADR-driven decision records for architectural clarity
-
-**Key Architectural Principles:**
-
-1.  **Deterministic Execution:** Reproducible agent task ordering and state transitions.
-2.  **Isolation & Security:** WASM sandboxing, signed plugins, and controlled GPU/CPU access.
-3.  **Performance:** Multi-threaded CPU execution, GPU acceleration for inference.
-4.  **Modularity:** Loosely coupled subsystems; optional UI decoupled from core runtime.
-5.  **Cross-Platform:** Linux, Windows, macOS support.
+**Status**: Proposed
+**Version**: 0.2
+**Date**: 2025-12-13
+**Owners**: [Engineering Team]
+**Reviewers**: [CTO, Platform Architecture, ML Systems]
+**Tags**: [Architecture, Runtime, Node.js, WASM, ONNX, Deterministic, Multi-Agent]
 
 ---
 
-## 2. Core Components
+## 1. Abstract
 
-### 2.1 Node.js Orchestrator
+This RFC defines the architecture for a local-first, deterministic multi-agent runtime built on WebAssembly (WASM) and Node.js. The system is designed to execute CPU-bound deterministic operations and GPU-accelerated ML/LLM inference in a fully sandboxed, headless-first environment. Optional UI components are strictly decoupled. The runtime enforces reproducibility, memory safety, secure plugin management, and operation-level observability while remaining cross-platform (Linux, Windows, macOS).
 
-*   Central scheduler (FIFO/priority; DAG deferred to v2)
-*   Task queue management with deterministic tick clock
-*   Agent lifecycle management
-*   Plugin/ABI enforcement and versioning
-*   Replay logging and deterministic event tracking
-*   Interface to Model Management Service
-
-### 2.2 WASM Worker Pool
-
-*   Executes CPU-bound agent logic in isolated threads
-*   Instruction metering and bounded step execution
-*   Communication via `SharedArrayBuffer` + `Atomics` with orchestrator
-*   No direct OS/GPU access
-
-### 2.3 ONNX Runtime
-
-*   Executes GPU-bound inference with deterministic kernels
-*   CPU fallback for environments without GPU
-*   Centralized model management (load, unload, cache, versioning)
-*   Replayable inference requests logged
-
-### 2.4 Optional UI Layer
-
-*   Fully decoupled, read-only visualization and monitoring
-*   IPC communication via WebSockets or memory-mapped files
-*   Never directly interacts with WASM or ONNX Runtime
+This document includes:
+- System component specifications
+- Memory and telemetry architecture
+- Deterministic operation contracts
+- Fault handling, recovery, and replay semantics
+- Performance and reproducibility targets
+- Build, deployment, and future extension roadmap
 
 ---
 
-## 3. Data Flow & Communication
+## 2. Goals & Design Principles
 
-### In-Process
+### Primary Goals
+1.  **Deterministic Multi-Agent Execution**: Identical inputs must yield identical global system behavior across runs and platforms.
+2.  **Hybrid Execution Support**: CPU-bound deterministic tasks and GPU/CPU-based ML/LLM inference treated as first-class operations.
+3.  **Local-First, Headless-First**: Fully functional without UI or cloud connectivity. Visualization is optional and read-only.
+4.  **Cross-Platform Consistency**: Linux, Windows, macOS; CPU fallback guarantees functional equivalence.
+5.  **Safety & Isolation**: WASM sandboxing, controlled I/O, strict memory ownership.
+6.  **Observability & Telemetry**: Operation-level logging, metrics, message tracing, and deterministic replay.
+7.  **Extensible & Modular**: Loosely coupled components; versioned plugin ABI; future federation and multi-tenant support.
 
-*   Orchestrator ↔️ WASM via `SharedArrayBuffer` + `Atomics`
-*   Zero-copy, thread-safe, deterministic memory access
+### Non-Goals
+-   Distributed consensus or cross-machine state replication
+-   Direct OS or GPU API access from agents
+-   Embedded UI/graphical engine
+-   Long-term persistence or database management
 
-### Cross-Process
+---
 
-*   Orchestrator ↔️ UI via IPC (WebSockets, memory-mapped files)
-*   Pull-based snapshots to avoid blocking orchestrator
+## 3. System Components
 
-### Message Ordering & Replay
+### 3.1 Node.js Orchestrator
 
-*   Guaranteed per topic
-*   Backpressure applied when queues full
-*   Event logs support deterministic replay
+**Responsibilities**:
+-   Agent lifecycle management (spawn, pause, resume, terminate)
+-   Deterministic scheduling (FIFO/priority; DAG deferred v2)
+-   Global state management and deterministic logging
+-   IPC hub for inter-component messaging
+-   Plugin verification, ABI enforcement, capability declarations
+
+### 3.2 WASM Worker Pool
+
+**Responsibilities**:
+-   Executes CPU-bound deterministic agent logic inside sandboxed workers
+-   Memory-safe, isolated linear memory per agent
+-   Instruction metering, bounded step execution, deterministic outputs
+-   Receives typed messages and shared memory events via orchestrator
+
+### 3.3 ONNX Runtime
+
+**Responsibilities**:
+-   Executes GPU-accelerated ML/LLM inference
+-   CPU fallback ensures deterministic functional behavior
+-   Model lifecycle management: load, unload, cache, version tracking
+-   Controlled stochastic execution for LLM inference with replayable logs
+
+### 3.4 Optional UI Layer
+
+**Responsibilities**:
+-   Read-only visualization of agent and runtime state
+-   Dashboards for operation metrics, scheduling, and telemetry
+-   Runs in a separate process; communicates via IPC
+-   Cannot mutate agent or orchestrator state
+
+---
+
+## 4. Memory & Telemetry Architecture
+
+### 4.1 Memory Model
+
+```mermaid
+graph LR
+    SharedMem["SharedArrayBuffer Region"]
+    Orchestrator["Orchestrator Memory & State"]
+    W1["WASM Worker 1 Heap"]
+    W2["WASM Worker 2 Heap"]
+    ONNX["ONNX GPU/CPU Memory"]
+
+    SharedMem --> Orchestrator
+    Orchestrator --> W1
+    Orchestrator --> W2
+    Orchestrator --> ONNX
+```
+
+**Key Principles**:
+-   Each WASM worker has isolated linear memory.
+-   `SharedArrayBuffer` for orchestrator ↔ worker communication; synchronized via Atomics.
+-   Mutable state only flows through orchestrator.
+-   ONNX memory fully managed by runtime; agents have no direct access.
+
+### 4.2 Telemetry & Observability
 
 ```mermaid
 graph TD
-    O["Node.js Orchestrator<br>Scheduler & IPC Hub"]
-    subgraph W["WASM Worker Pool"]
-        W1["Worker 1"]
-        W2["Worker 2"]
-        Wn["..."]
-    end
-    ONNX["ONNX Runtime<br>GPU/CPU Inference"]
-    UI["Optional UI<br>Read-Only"]
+    Orchestrator["Node.js Orchestrator"]
+    WASM["WASM Workers"]
+    ONNX["ONNX Runtime"]
+    UI["Optional UI"]
+    Telemetry["Telemetry & Audit Logs"]
 
-    O --> W
-    O --> ONNX
-    O --> UI
-    W --> O
-    ONNX --> O
+    WASM --> Orchestrator
+    ONNX --> Orchestrator
+    Orchestrator --> Telemetry
+    Telemetry --> UI
 ```
 
----
-
-## 4. Memory & Resource Management
-
-*   WASM heaps: isolated per worker
-*   Shared memory synchronized via `Atomics`
-*   GPU memory managed solely by ONNX Runtime
-*   Node.js orchestrator monitors CPU and memory usage
+**Telemetry Features**:
+-   Operation-level logging: inputs, outputs, scheduling, resource usage
+-   Message tracing: ordering, latency, throughput
+-   Deterministic logging for replay
+-   Optional UI dashboards for real-time monitoring
+-   Append-only storage for auditability and compliance
 
 ---
 
-## 5. Determinism Contracts
+## 5. Agent ABI & Plugin Security
 
-| Subsystem          | Guarantee                                                                                      |
-| ------------------ | ---------------------------------------------------------------------------------------------- |
-| Scheduler          | Linear FIFO/priority queue; DAG deferred v2; tick clock ensures reproducibility                |
-| WASM Agent         | Bounded, metered execution; deterministic outputs per identical input                          |
-| ONNX Runtime       | CPU deterministic; GPU deterministic if possible; functional consistency                       |
-| Messaging & Memory | All mutable state flows through orchestrator; SharedArrayBuffer + Atomics; replayable messages |
+**ABI Functions**:
+-   `agent_init()`
+-   `agent_step(context_ptr)`
+-   `agent_receive(message_ptr)`
+-   `agent_shutdown()`
 
-**Ordering-Only Determinism** is applied across federated multi-agent execution (ADR-002).
-
----
-
-## 6. Agent ABI & Plugin Model
-
-*   ABI v1: `agent_init()`, `agent_step()`, `agent_receive()`, `agent_shutdown()`
-*   Plugin signing, capability declarations, orchestrator-enforced versioning
-*   No direct OS or GPU access; all interactions brokered via orchestrator
+**Plugin Security Model**:
+-   Signed modules with declared capabilities
+-   ABI version verification by orchestrator
+-   No direct OS or GPU access; all operations brokered
+-   Audit logs record module versions, capabilities, and execution
 
 ---
 
-## 7. Model Management & Inference
+## 6. Determinism & Operation Contracts
 
-*   Managed centrally by orchestrator or model service
-*   Model caching, load/unload, version tracking
-*   Deterministic execution enforced, CPU fallback preserves functional outputs
-*   GPU inference variance ±5%, CPU fully deterministic
-
----
-
-## 8. Fault Handling
-
-*   Isolated agent crashes
-*   WASM worker preemption via instruction metering
-*   ONNX inference fallback to CPU
-*   Deterministic logging for replay and debugging
+| Subsystem      | Guarantee                                                                     |
+| -------------- | ----------------------------------------------------------------------------- |
+| Scheduler      | Deterministic FIFO/priority queue; tick clock; DAG scheduling deferred        |
+| WASM Agent     | Bounded execution; deterministic outputs per input; no wall-clock I/O unless sandboxed |
+| ONNX Runtime   | CPU deterministic; GPU deterministic where possible; CPU fallback preserves functional outputs |
+| Messaging & Memory | `SharedArrayBuffer` + Atomics; all mutable state flows through orchestrator; messages replayable |
+| Operations     | Typed input/output contracts; LLM ops controlled stochastic; deterministic replay supported |
 
 ---
 
-## 9. Performance & Reproducibility Targets
+## 7. Fault Handling & Recovery
+
+-   Agent crashes isolated; orchestrator continues
+-   WASM workers preempted via metering
+-   ONNX failures fallback to CPU
+-   Retry/backoff handled deterministically
+-   Checkpointing & replay from logged inputs
+
+---
+
+## 8. Performance & Reproducibility Targets
 
 | Metric                  | Target                                   |
 | ----------------------- | ---------------------------------------- |
-| Scheduler tick overhead | <10 ms per 50 agents                     |
+| Scheduler tick overhead | <10 ms per 50 active agents              |
 | CPU agent step          | <5 ms                                    |
-| ONNX inference variance | ±5% GPU, CPU bit-level reproducibility   |
-| Message throughput      | ≥10k msgs/sec via orchestrator           |
+| ONNX inference variance | ±5% GPU; CPU deterministic bit-level     |
+| Message throughput      | ≥10k messages/sec via orchestrator       |
+| Shared memory latency   | <1 ms                                    |
+
+---
+
+## 9. Data Flow & Communication
+
+-   **Orchestrator ↔ WASM Workers**: `SharedArrayBuffer` + Atomics; deterministic, thread-safe
+-   **Orchestrator ↔ ONNX Runtime**: Typed inference requests; replayable output
+-   **Orchestrator ↔ UI / External Processes**: Pull-based IPC snapshots; read-only
 
 ---
 
 ## 10. Build & Deployment
 
-*   Compile agent code to WASM (Rust/C++), multi-threaded + SIMD enabled
-*   Node.js runtime packaged with required dependencies (`onnxruntime-node`)
-*   Cross-platform builds include correct ONNX binaries for Linux, Windows, macOS
+-   Compile Rust/C++ agent code to WASM with multi-threading/SIMD enabled
+-   Node.js packaged runtime with `onnxruntime-node` dependencies
+-   Cross-platform builds with native ONNX binaries
+-   Signed module verification and deterministic build pipelines
 
 ---
 
-## 11. Optional UI
+## 11. Future Enhancements
 
-*   Servo: lightweight Rust-native UI for visualization
-*   Electron: full-featured UI if rich ecosystem is needed
-*   Always decoupled from compute; read-only, optional attachment
+-   DAG-based scheduler (v2) with explicit operation dependencies
+-   Dynamic scaling of WASM worker pools
+-   Multi-instance federation and multi-tenant agent sandboxes
+-   WASI integration for controlled system resource access
+-   GitOps-style operation deployment and workflow provenance tracking
 
 ---
 
@@ -260,25 +290,30 @@ adr_index:
 
 ---
 
-## 13. Future Enhancements
+## 13. Milestone Roadmap
 
-*   DAG-based scheduling (v2)
-*   Dynamic WASM worker scaling
-*   Multi-instance federation
-*   Multi-tenant agent sandboxes
-*   WASI integration
-*   Optional WebGPU/Dawn compute acceleration
+```mermaid
+gantt
+    title Implementation Milestone Roadmap
+    dateFormat  YYYY-MM-DD
+    axisFormat  %b %Y
+
+    section Phase 1: Core Deterministic Runtime
+    Deterministic Ops Foundation :crit, done, 2025-12-15, 30d
+    LLM Ops Integration (ONNX)   :crit, active, 2026-01-15, 30d
+
+    section Phase 2: Observability & Tooling
+    Telemetry & Logging Hooks    :active, 2026-02-15, 45d
+    Agent SDK & Toolchain        :2026-04-01, 45d
+
+    section Phase 3: Advanced Features
+    DAG Scheduler (v2)           :2026-05-16, 60d
+    Federation & Multi-Tenancy   :2026-07-15, 60d
+```
 
 ---
 
 ## 14. References
-
-*   [ONNX Runtime Documentation](https://onnxruntime.ai/docs/)
-*   [WebAssembly Threads and Atomics (MDN)](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly)
-*   [Node.js Worker Threads](https://nodejs.org/api/worker_threads.html)
-*   ADR-001 → ADR-013
-
----
-
-**Notes:**
-This master ADD is **modular** and ADR-driven, allowing each decision to be referenced independently. New ADRs can be added incrementally as the runtime evolves, making the document maintainable and reviewable for architecture and engineering teams.
+-   **[Product Requirements Document (PRD)](./PRD-local-first-multi-agent-runtime.md)**
+-   **[Authoritative Technical Specification Document (ATSD)](./ATSD.md)**
+-   **[ADR-001: Shared Runtime Architecture](./ADR-001-shared-runtime.md)**
