@@ -55,7 +55,7 @@ describe('Merge Commit Projection', () => {
     const parentDataCommits = dataCommitInfo.split('\n').filter(line => line.startsWith('parent '));
     expect(parentDataCommits).toHaveLength(1); // Data branch should be linear
 
-    const metadataContent = await git.show([`${dataCommitSha}:metadata/commit.json`]);
+    const metadataContent = await git.show([`${dataCommitSha}:metadata.json`]);
     const metadata = JSON.parse(metadataContent);
     expect(metadata.source_parent_shas).toHaveLength(2);
   });

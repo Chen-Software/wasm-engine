@@ -68,13 +68,13 @@ describe('Basic Projection (Linear History)', () => {
     const sourceCommit = await repoBuilder.commit('commit with metadata', { 'a.txt': 'data' });
     const dataCommit = await projectCommit(repoBuilder.repoPath, sourceCommit);
 
-    const metadataContent = await git.show([`${dataCommit}:metadata/commit.json`]);
+    const metadataContent = await git.show([`${dataCommit}:metadata.json`]);
     const metadata = JSON.parse(metadataContent);
 
     expect(metadata.original_commit_sha).toEqual(sourceCommit);
     expect(metadata.parent_data_commit_oid).toBeNull();
-    expect(metadata.snapshot_hash).toBeDefined();
-    expect(metadata.files).toHaveLength(1);
-    expect(metadata.files[0].path).toEqual('a.txt');
+    expect(metadata.artifacts[0].snapshot_hash).toBeDefined();
+    expect(metadata.artifacts[0].files).toHaveLength(1);
+    expect(metadata.artifacts[0].files[0].path).toEqual('a.txt');
   });
 });

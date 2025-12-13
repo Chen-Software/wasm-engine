@@ -50,4 +50,12 @@ export class TestRepoBuilder {
     const branchSummary = await this.git.branch();
     return branchSummary.current;
   }
+
+  public async createArtifactManifest(manifest: { artifacts: { name: string, files: string[] }[] }): Promise<void> {
+    const yaml = await import('js-yaml');
+    const manifestContent = yaml.dump(manifest);
+    const filePath = path.join(this.repoPath, '.artifacts.yaml');
+    await fs.writeFile(filePath, manifestContent);
+    await this.git.add(filePath);
+  }
 }

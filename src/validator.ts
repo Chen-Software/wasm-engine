@@ -14,7 +14,7 @@ export async function validateTreeHash(repoPath: string, dataCommitSha: string):
   const git: SimpleGit = simpleGit(repoPath);
 
   // 1. Get the original source commit SHA from the data commit's metadata.
-  const metadataContent = await git.show([`${dataCommitSha}:metadata/commit.json`]);
+  const metadataContent = await git.show([`${dataCommitSha}:metadata.json`]);
   const metadata = JSON.parse(metadataContent);
   const sourceCommitSha = metadata.original_commit_sha;
 
@@ -25,8 +25,8 @@ export async function validateTreeHash(repoPath: string, dataCommitSha: string):
   // 2. Get the tree SHA of the original source commit.
   const sourceTreeSha = (await git.revparse([`${sourceCommitSha}^{tree}`])).trim();
 
-  // 3. Get the tree SHA of the projected artifacts subdirectory.
-  const artifactsTreeSha = (await git.revparse([`${dataCommitSha}:artifacts`])).trim();
+  // 3. Get the tree SHA of the 'default' artifact for backward compatibility.
+  const artifactsTreeSha = (await git.revparse([`${dataCommitSha}:artifacts/default`])).trim();
 
   // 4. Compare the tree SHAs.
   return sourceTreeSha === artifactsTreeSha;

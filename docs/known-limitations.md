@@ -2,18 +2,19 @@
 
 This document outlines the known limitations of the current Proof of Concept (PoC) implementation and identifies areas for future work.
 
-## PoC Scope Boundaries
+## Implemented in Phase 3
 
-The following features were intentionally deferred to keep the PoC focused on validating the critical path and core architectural principles.
+- **Multi-File Artifacts**: The system now supports the definition of multiple artifacts via an `.artifacts.yaml` manifest.
+- **Registry Synchronization**: A deterministic, Git-native artifact registry is now implemented and updated with each projection.
 
-- **Rebase Handling**: The current implementation does not handle rebased source commits. If a source branch is rebased, the projection system will treat the rebased commits as entirely new commits, leading to duplicate projections on the data branch. A future version will need to detect rebased commits and either update the corresponding data commits or provide a clear mechanism for handling them.
+## Future Work (Post-Phase 3)
 
-- **Error Recovery**: The PoC does not include robust error recovery. If a projection fails, it will simply throw an error. A production system would require a more sophisticated error handling strategy, such as creating error markers on the data branch or implementing transactional logic to ensure that the branch is always in a consistent state.
+The following features were intentionally deferred and represent the next logical steps for a production system.
 
-- **Performance Optimization**: The current implementation is not optimized for performance. The use of a temporary staging repository, while robust, introduces overhead. For large repositories or high-frequency commit rates, performance may be a concern. Future work could explore optimizations such as caching, parallel operations, or a more efficient tree-building strategy if the current approach proves to be a bottleneck.
+- **Rebase & Orphaned Commit Handling**: The current implementation does not handle rebased source commits. Future work should focus on detecting rebased commits and updating the registry to mark the old data commits as "orphaned" and point to the new, canonical projections.
 
-- **Cross-Platform Compatibility**: The PoC was developed and tested on a Linux-based environment. It has a dependency on the `tar` shell command and makes assumptions about line endings (LF-only). A production version would need to be tested and potentially adapted for other operating systems, particularly Windows (which uses CRLF line endings and has a case-insensitive filesystem).
+- **Performance Optimization**: The current implementation is not optimized for performance. For large repositories, the process of creating a temporary staging repository for each projection could become a bottleneck. Future work could explore caching of unchanged artifacts and other performance enhancements.
 
-- **Multi-File Artifacts**: The current model assumes that the entire source tree is a single artifact. The system does not yet support the concept of grouping specific files or directories into distinct, versioned artifacts.
+- **Cross-Platform Compatibility**: The PoC has been developed and tested on a Linux-based environment and has a dependency on the `tar` shell command. A production version would need to be tested and hardened for other operating systems, particularly Windows.
 
-- **Registry Synchronization**: The PoC does not include any logic for synchronizing with a central registry or manifest file (e.g., `.llm-context/registry.yaml`). This will be a critical feature for a production system.
+- **Schema Validation**: The `.artifacts.yaml` and `.llm-context/registry.yaml` files are parsed with the assumption that they are correctly formatted. A production system should include robust schema validation to provide clear error messages for malformed user input.

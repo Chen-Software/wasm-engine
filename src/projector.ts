@@ -3,17 +3,27 @@
 import { simpleGit, SimpleGit } from 'simple-git';
 import { setDeterministicGitEnvironment } from './projection-env';
 import { computeSnapshotHash } from './snapshot';
+import { parseArtifactManifest } from './artifacts-parser';
+import { readRegistry, updateRegistry, REGISTRY_PATH } from './registry';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { exec } from './utils';
+import * as yaml from 'js-yaml';
+
+// Interfaces
+interface ArtifactMetadata {
+  name: string;
+  original_commit_sha: string;
+  snapshot_hash: string;
+  files: { path: string; blob_sha: string; mode: string; size: number }[];
+}
 
 interface ProjectionMetadata {
   original_commit_sha: string;
   parent_data_commit_oid: string | null;
   source_parent_shas: string[];
-  snapshot_hash: string;
-  files: { path: string; blob_sha: string; mode: string; size: number }[];
+  artifacts: ArtifactMetadata[];
 }
 
 export async function projectCommit(repoPath: string, sourceCommitSha: string): Promise<string> {
@@ -23,81 +33,83 @@ export async function projectCommit(repoPath: string, sourceCommitSha: string): 
   const parentDataCommitOid = await mainGit.revparse([dataBranch]).catch(() => null);
 
   if (parentDataCommitOid) {
-    const metadataContent = await mainGit.show([`${parentDataCommitOid}:metadata/commit.json`]);
-    const existingMetadata: ProjectionMetadata = JSON.parse(metadataContent);
-    if (existingMetadata.original_commit_sha === sourceCommitSha) {
+    const metadataContent = await mainGit.show([`${parentDataCommitOid}:metadata.json`]);
+    if (JSON.parse(metadataContent).original_commit_sha === sourceCommitSha) {
       return parentDataCommitOid;
     }
   }
 
-  const snapshotHash = await computeSnapshotHash(repoPath, sourceCommitSha);
-  const lsTreeOutput = await mainGit.raw(['ls-tree', '-r', '--long', sourceCommitSha]);
-  const files = lsTreeOutput.trim().split('\n').map(line => {
-    const [meta, path] = line.trim().split('\t');
-    const [mode, _type, blob_sha, sizeStr] = meta.split(/\s+/);
-    return {
-      mode: mode,
-      blob_sha: blob_sha,
-      size: parseInt(sizeStr.trim(), 10),
-      path: path,
-    };
-  });
-
-  // Get all parent SHAs of the source commit
-  const parentShasStr = await mainGit.raw(['show', '--no-patch', '--format=%P', sourceCommitSha]);
-  const sourceParentShas = parentShasStr.trim().split(' ');
-
-  const metadata: ProjectionMetadata = {
-    original_commit_sha: sourceCommitSha,
-    parent_data_commit_oid: parentDataCommitOid,
-    source_parent_shas: sourceParentShas,
-    snapshot_hash: snapshotHash,
-    files: files,
-  };
-
-  // --- New Robust Tree Building Strategy ---
   const stagingRepoPath = await fs.mkdtemp(path.join(os.tmpdir(), 'staging-repo-'));
   try {
     const stagingGit = simpleGit(stagingRepoPath);
     await stagingGit.init();
 
-    // 1. Create the artifacts directory and check out the source tree into it
-    const artifactsDir = path.join(stagingRepoPath, 'artifacts');
-    await fs.mkdir(artifactsDir);
-    // Use git archive | tar to check out the tree without a .git directory
-    const archivePath = path.join(artifactsDir, 'archive.tar');
-    await mainGit.raw(['archive', '--format=tar', sourceCommitSha, '-o', archivePath]);
-    await exec(`tar -xf ${archivePath} -C ${artifactsDir}`);
-    await fs.unlink(archivePath);
+    // 1. Build artifacts and their metadata
+    const manifest = await parseArtifactManifest(repoPath, sourceCommitSha);
+    const artifactsToProject = manifest ? manifest.artifacts : [{ name: 'default', files: ['.'] }];
+    const allArtifactsMetadata: ArtifactMetadata[] = [];
 
-    // 2. Create the metadata file
-    const metadataDir = path.join(stagingRepoPath, 'metadata');
-    await fs.mkdir(metadataDir);
-    await fs.writeFile(path.join(metadataDir, 'commit.json'), JSON.stringify(metadata, null, 2));
+    for (const artifact of artifactsToProject) {
+      const archivePath = path.join(stagingRepoPath, `${artifact.name}.tar`);
+      await mainGit.raw(['archive', sourceCommitSha, ...artifact.files, '-o', archivePath]);
+      const artifactDir = path.join(stagingRepoPath, 'artifacts', artifact.name);
+      await fs.mkdir(artifactDir, { recursive: true });
+      await exec(`tar -xf ${archivePath} -C ${artifactDir}`);
+      await fs.unlink(archivePath);
 
-    // 3. Commit the new tree in the staging repo
+      const snapshotHash = await computeSnapshotHash(repoPath, sourceCommitSha, artifact.files);
+      const lsTreeOutput = await mainGit.raw(['ls-tree', '-r', '--long', sourceCommitSha, ...artifact.files]);
+      const files = lsTreeOutput.trim().split('\n').map(line => {
+        const [meta, path] = line.trim().split('\t');
+        const [mode, _type, blob_sha, sizeStr] = meta.split(/\s+/);
+        return { mode, blob_sha, size: parseInt(sizeStr.trim(), 10), path };
+      });
+      allArtifactsMetadata.push({ name: artifact.name, original_commit_sha: sourceCommitSha, snapshot_hash: snapshotHash, files });
+    }
+
+    // 2. Build the main metadata file
+    const parentShasStr = await mainGit.raw(['show', '--no-patch', '--format=%P', sourceCommitSha]);
+    const sourceParentShas = parentShasStr.trim().split(' ');
+    const projectionMetadata: ProjectionMetadata = {
+      original_commit_sha: sourceCommitSha,
+      parent_data_commit_oid: parentDataCommitOid,
+      source_parent_shas: sourceParentShas,
+      artifacts: allArtifactsMetadata,
+    };
+    await fs.writeFile(path.join(stagingRepoPath, 'metadata.json'), JSON.stringify(projectionMetadata, null, 2));
+
+    // 3. Prepare the registry for this commit
+    let registryToStore: any = {};
+    if (parentDataCommitOid) {
+      const parentRegistry = await readRegistry(mainGit, parentDataCommitOid);
+      const parentMetadataContent = await mainGit.show([`${parentDataCommitOid}:metadata.json`]);
+      const parentMetadata = JSON.parse(parentMetadataContent);
+      const parentArtifactNames = parentMetadata.artifacts.map((a: any) => a.name);
+      registryToStore = updateRegistry(parentRegistry, parentArtifactNames, parentDataCommitOid);
+    }
+
+    const registryDir = path.join(stagingRepoPath, path.dirname(REGISTRY_PATH));
+    await fs.mkdir(registryDir, { recursive: true });
+    await fs.writeFile(path.join(stagingRepoPath, REGISTRY_PATH), yaml.dump(registryToStore));
+
+    // 4. Create the commit in the staging repo
     await stagingGit.add('.');
     const stagingCommit = await stagingGit.commit('Build projection tree');
     const projectionTreeSha = (await stagingGit.revparse([`${stagingCommit.commit}^{tree}`])).trim();
 
-    // 4. Fetch the staged objects into the main repository
+    // 5. Create the definitive data commit in the main repo
     await mainGit.fetch(stagingRepoPath, 'HEAD');
-
-    // 5. Create the final data commit in the main repo using the staged tree
     const commitMessage = `Projection of ${sourceCommitSha}`;
-    const commitArgs = [projectionTreeSha];
+    const commitArgs = [projectionTreeSha, '-m', commitMessage];
     if (parentDataCommitOid) {
       commitArgs.push('-p', parentDataCommitOid);
     }
-    commitArgs.push('-m', commitMessage);
-
     const newDataCommitSha = (await mainGit.raw(['commit-tree', ...commitArgs])).trim();
 
-    // 5. Update the data branch ref
+    // 6. Update the data branch ref
     await mainGit.raw(['update-ref', dataBranch, newDataCommitSha]);
 
     return newDataCommitSha;
-
   } finally {
     await fs.rm(stagingRepoPath, { recursive: true, force: true });
   }
